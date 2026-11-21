@@ -15,6 +15,12 @@ public struct StorageSettings: Codable, Sendable, Equatable {
     public var confirmed: Bool = false
     public var lastTrashReminder: Date?
     public var lastLimitWarning: Date?
+    /// "Check for updates automatically once a day". Off unless the user turns it on (nil = never set = off).
+    public var autoUpdateCheck: Bool?
+    public var lastUpdateCheck: Date?
+    /// The newest version this computer heard of (from an update check or the other computer), and its page.
+    public var latestVersion: String?
+    public var latestURL: String?
 
     public init() {}
 

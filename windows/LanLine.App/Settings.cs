@@ -23,7 +23,7 @@ sealed partial class MainWindow
 
     // panel parts
     readonly TextBlock _setFirstRun = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
-    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new();
+    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new(), _updatePills = new();
     readonly TextBox _customDays = new(), _customGB = new();
     Border _customDaysBox = null!, _customGBBox = null!;   // built in BuildSettingsPanel
     readonly StackPanel _overRow = new();
@@ -42,9 +42,42 @@ sealed partial class MainWindow
         _storage = StorageSettings.Load(SettingsPath);
         RunCleanup(manual: false);
         _cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
-        _cleanupTimer.Tick += (_, _) => RunCleanup(manual: false);
+        _cleanupTimer.Tick += (_, _) => { RunCleanup(manual: false); _ = CheckForUpdates(manual: false); };
         _cleanupTimer.Start();
+        if (SavedLatest() is { } a) ShowUpdate(a.Version.ToString(), a.Url);
+        _ = CheckForUpdates(manual: false);
         if (!_storage.Confirmed) ShowSettings(firstRun: true);   // every launch until saved once
+    }
+
+    // ---------- updates (the only network call; manual, or daily if the user turned it on)
+
+    string MyVersion => Arg(_args, "--app-version") ?? AppInfo.Version;
+
+    /// <summary>The saved "newest version heard of", if it is still newer than this app.</summary>
+    Updates.Available? SavedLatest() =>
+        LanLineVersion.Parse(_storage.LatestVersion) is { } v && Updates.IsAllowedUrl(_storage.LatestUrl)
+        && LanLineVersion.Parse(MyVersion) is { } own && v > own ? new Updates.Available(v, _storage.LatestUrl!) : null;
+
+    void RememberLatest(string version, string url)
+    {
+        if (_storage.LatestVersion == version) return;
+        _storage.LatestVersion = version; _storage.LatestUrl = url;
+        try { _storage.Save(SettingsPath); } catch (Exception) { }
+    }
+
+    async Task CheckForUpdates(bool manual)
+    {
+        if (!manual && !Updates.DueForAutoCheck(_storage, DateTime.UtcNow)) return;
+        if (LanLineVersion.Parse(MyVersion) == null) { if (manual) Note("This build has no version number to compare.", 6); return; }
+        _storage.LastUpdateCheck = DateTime.UtcNow;
+        try { _storage.Save(SettingsPath); } catch (Exception) { }
+        var r = await Updates.FetchLatest(MyVersion);   // resumes on the UI thread
+        if (r is { Kind: Updates.Outcome.Available, Found: { } a })
+        {
+            if (_session != null) _session.NoteLatest(a); else ShowUpdate(a.Version.ToString(), a.Url);
+            if (manual) ShowUpdate(a.Version.ToString(), a.Url);
+        }
+        else if (Updates.Message(r, manual) is { } m) Note(m, 6);
     }
 
     void ShowSettings(bool firstRun = false)
@@ -94,7 +127,7 @@ sealed partial class MainWindow
 
     void RefreshUsage()
     {
-        var existing = ReceivedLog.Load(LogPath).Where(f => File.Exists(f.Path)).ToList();
+        var existing = ReceivedLog.Load(LogPath).Where(f => Path.Exists(f.Path)).ToList();
         _usageBytes = existing.Sum(f => f.Size);
         // Files in the folder that Lan-Line doesn't manage (received before 0.9.0-beta.3, or put there by hand).
         var managed = existing.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -109,7 +142,7 @@ sealed partial class MainWindow
     void RunCleanup(bool manual)
     {
         var log = ReceivedLog.Load(LogPath);
-        var existing = log.Where(f => File.Exists(f.Path)).ToList();
+        var existing = log.Where(f => Path.Exists(f.Path)).ToList();
         var now = DateTime.UtcNow;
         var plan = Cleanup.Plan(existing, _storage, now);
         var moved = plan.ToTrash.Where(f => RecycleBin.Send(f.Path)).ToList();
@@ -189,6 +222,14 @@ sealed partial class MainWindow
         col.Children.Add(note);
         _unmanagedText.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(_unmanagedText);
+
+        col.Children.Add(Label("Check for updates automatically"));
+        _updatePills.Children.Add(Pill("updates", "Off", false));
+        _updatePills.Children.Add(Pill("updates", "Once a day", true));
+        col.Children.Add(_updatePills);
+        var upNote = new TextBlock { Text = "Off unless you turn it on. Lan-Line then reads one small file from averywrobinson.com once a day. It sends no ID and nothing about your files.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        upNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(upNote);
         _setError.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
 
         var open = new Button { Content = "Open folder" };
@@ -268,6 +309,7 @@ sealed partial class MainWindow
         _customGB.Text = limKnown ? "" : s.LimitGB.ToString("0.##");
         Select(_overPills, t => (string?)t == s.OverLimit);
         Select(_remindPills, t => t is bool b && b == s.TrashReminder);
+        Select(_updatePills, t => t is bool u && u == (s.AutoUpdateCheck == true));
         _setFirstRun.Visibility = _settingsFirstRun ? Visibility.Visible : Visibility.Collapsed;
         _setCancel.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
         _setError.Visibility = Visibility.Collapsed;
@@ -320,6 +362,7 @@ sealed partial class MainWindow
         }
         if (Selected(_overPills) is string o) s.OverLimit = o;
         if (Selected(_remindPills) is bool b) s.TrashReminder = b;
+        if (Selected(_updatePills) is bool u) s.AutoUpdateCheck = u;
         s.Confirmed = true;
         _setError.Visibility = Visibility.Collapsed;
         return s;
@@ -329,6 +372,7 @@ sealed partial class MainWindow
 
     void SaveSettings(StorageSettings s)
     {
+        s.LastUpdateCheck = _storage.LastUpdateCheck; s.LatestVersion = _storage.LatestVersion; s.LatestUrl = _storage.LatestUrl;
         _storage = s;
         try { s.Save(SettingsPath); } catch (Exception e) { Note($"Couldn't save settings: {e.Message}"); }
         _settingsFirstRun = false;
@@ -367,6 +411,6 @@ static class RecycleBin
         const uint FO_DELETE = 3;
         const ushort FOF_SILENT = 0x4, FOF_NOCONFIRMATION = 0x10, FOF_ALLOWUNDO = 0x40, FOF_NOERRORUI = 0x400;
         var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = path + "\0", fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI };
-        return SHFileOperation(ref op) == 0 && op.fAnyOperationsAborted == 0 && !File.Exists(path);
+        return SHFileOperation(ref op) == 0 && op.fAnyOperationsAborted == 0 && !Path.Exists(path);
     }
 }

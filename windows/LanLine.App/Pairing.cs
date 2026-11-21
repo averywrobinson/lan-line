@@ -73,7 +73,8 @@ sealed partial class MainWindow
     {
         Role role = Listens(cfg) ? new Role.Listen(Port) : new Role.Dial(Arg(_args, "--connect")?.Split(',') ?? cfg.Hosts, Port);
         var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, RekeyOnPair = pairing && Listens(cfg),
-            Advertise = Listens(cfg) && Arg(_args, "--connect") == null ? [.. Discovery.LocalAddresses()] : [] };
+            Advertise = Listens(cfg) && Arg(_args, "--connect") == null ? [.. Discovery.LocalAddresses()] : [],
+            AppVersion = MyVersion, LatestKnown = SavedLatest() };
         // The one UI-thread hop: the Session calls this on its own queue thread.
         _session = new Session(role, config, e => Dispatcher.BeginInvoke(() => Handle(e)));
         _session.Start();
@@ -241,8 +242,12 @@ sealed partial class MainWindow
         var pin = new MenuItem { Header = "Keep on top", InputGestureText = "Ctrl+P", IsCheckable = true };
         m.Opened += (_, _) => pin.IsChecked = _pinned;
         pin.Click += (_, _) => { _pinned = !_pinned; ApplyPin(); };
+        var check = new MenuItem { Header = "Check for updates…" };
+        check.Click += (_, _) => _ = CheckForUpdates(manual: true);
         m.Items.Add(pair);
         m.Items.Add(pin);
+        m.Items.Add(new Separator());
+        m.Items.Add(check);
         return m;
     }
 

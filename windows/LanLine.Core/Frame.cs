@@ -24,6 +24,18 @@ public sealed record Frame
     [JsonPropertyName("nonce")] public string? Nonce { get; init; }
     [JsonPropertyName("epk")] public string? Epk { get; init; }
     [JsonPropertyName("mac")] public string? Mac { get; init; }
+    /// <summary>hello / hello_ok (beta.6+): "sha_end" (SHA-256 may come in file_end), "folders". Absent = beta.5.</summary>
+    [JsonPropertyName("caps")] public string[]? Caps { get; init; }
+    /// <summary>file_begin and mkdir inside a folder: the folder item's id and the "/"-separated path inside it.</summary>
+    [JsonPropertyName("folder")] public string? Folder { get; init; }
+    [JsonPropertyName("path")] public string? RelPath { get; init; }
+    /// <summary>folder_begin: how many files follow.</summary>
+    [JsonPropertyName("count")] public int? Count { get; init; }
+    /// <summary>"version" (encrypted, both ways, beta.6+): this side's version, and the newest version it knows of.</summary>
+    [JsonPropertyName("version")] public string? Version { get; init; }
+    [JsonPropertyName("latest_known")] public LatestKnownInfo? LatestKnown { get; init; }
+
+    public sealed record LatestKnownInfo([property: JsonPropertyName("version")] string Version, [property: JsonPropertyName("url")] string Url);
 
     public const int ProtocolVersion = LL2.Version;
     static readonly JsonSerializerOptions Opts = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
@@ -39,8 +51,14 @@ public sealed record Frame
     /// <summary>Encrypted, listener → dialer: the listener's own addresses.</summary>
     public static Frame Addresses(string[] a) => new() { Type = "addrs", Addrs = a };
     public static Frame TextItem(string id, string text) => new() { Type = "text", Id = id, Text = text };
-    public static Frame FileBegin(string id, string name, long size, string sha) => new() { Type = "file_begin", Id = id, Name = name, Size = size, Sha256 = sha };
-    public static Frame FileEnd(string id) => new() { Type = "file_end", Id = id };
+    /// <summary>sha null = it comes in file_end (the peer has "sha_end").</summary>
+    public static Frame FileBegin(string id, string name, long size, string? sha, string? folder = null, string? path = null) =>
+        new() { Type = "file_begin", Id = id, Name = name, Size = size, Sha256 = sha, Folder = folder, RelPath = path };
+    public static Frame FileEnd(string id, string? sha = null) => new() { Type = "file_end", Id = id, Sha256 = sha };
+    public static Frame FolderBegin(string id, string name, int count, long size) => new() { Type = "folder_begin", Id = id, Name = name, Count = count, Size = size };
+    public static Frame Mkdir(string folder, string path) => new() { Type = "mkdir", Folder = folder, RelPath = path };
+    public static Frame FolderEnd(string id) => new() { Type = "folder_end", Id = id };
+    public static Frame VersionInfo(string own, LatestKnownInfo? latest) => new() { Type = "version", Version = own, LatestKnown = latest };
     public static Frame Ack(string id, bool ok, string? err = null) => new() { Type = "ack", Id = id, Ok = ok, Err = err };
     public static readonly Frame Beat = new() { Type = "beat" };
 

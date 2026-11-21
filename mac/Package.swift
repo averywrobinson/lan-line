@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LanLine",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "LanLineCore", targets: ["LanLineCore"]),
         .executable(name: "LanLine", targets: ["LanLine"]),

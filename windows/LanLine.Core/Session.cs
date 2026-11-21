@@ -33,6 +33,12 @@ public sealed class SessionConfig
     public bool RekeyOnPair { get; init; }
     /// <summary>Listener: addresses to tell an authenticated dialer about (its fallbacks).</summary>
     public string[] Advertise { get; init; } = [];
+    /// <summary>What this side tells its peer it can do (PROTOCOL.md "Capabilities"). Tests set [] to act like beta.5.</summary>
+    public string[] Caps { get; init; } = ["sha_end", "folders"];
+    /// <summary>This app's version ("0.9.0-beta.6"), told to the other computer so either can say "an update is available".</summary>
+    public string AppVersion { get; init; } = "";
+    /// <summary>The newest version this computer already knows of (saved by the app), passed on to the other computer.</summary>
+    public Updates.Available? LatestKnown { get; init; }
     /// <summary>Liveness tick period; zero = no timer (tests call Tick themselves).</summary>
     public TimeSpan TickInterval { get; init; } = TimeSpan.FromSeconds(1);
 }
@@ -47,11 +53,18 @@ public sealed record ItemState(ItemStateKind Kind, double Progress = 0, string? 
     public static readonly ItemState ReceivedState = new(ItemStateKind.Received);
 }
 
-/// <summary>A text (Text set) or a file (FileName/Path set).</summary>
-public sealed record Item(string Id, bool Incoming, string? Text, string? FileName, long Size, string? Path, ItemState State)
+/// <summary>A text (Text set), a file (FileName/Path set) or a folder (also Count: how many files inside).</summary>
+public sealed record Item(string Id, bool Incoming, string? Text, string? FileName, long Size, string? Path, ItemState State, int? Count = null)
 {
     public bool IsFile => Text == null;
+    public bool IsFolder => Count != null;
 }
+
+/// <summary>One entry of an outgoing folder, in send order (a folder before what's inside it). File: FullPath set.</summary>
+public sealed record FolderEntry(string RelPath, string? FullPath, long Size);
+
+/// <summary>What Session.ScanFolder found; symlinks and junctions are never followed (Skipped).</summary>
+public sealed record FolderScan(List<FolderEntry> Entries, int Count, long Size, int Skipped);
 
 public abstract record SessionEvent
 {
@@ -61,6 +74,8 @@ public abstract record SessionEvent
     public sealed record Rekeyed(string Token) : SessionEvent;
     /// <summary>Dialer: the listener's addresses (from hello_ok); keep them as fallback hosts.</summary>
     public sealed record PeerAddresses(string[] Addrs) : SessionEvent;
+    /// <summary>A newer Lan-Line exists (from the other computer or an update check): show a link, nothing more.</summary>
+    public sealed record UpdateAvailable(string Version, string Url) : SessionEvent;
     public sealed record Disconnected(string Reason) : SessionEvent;
     public sealed record Received(Item Item) : SessionEvent;
     public sealed record Outgoing(Item Item) : SessionEvent;
@@ -83,13 +98,23 @@ public sealed class Session : IDisposable
     readonly Action<SessionEvent> _handler;
     readonly Func<DateTime> _now;
 
-    sealed class Out { public required Item Item; public string? Sha; public bool OnWire; }
+    sealed class Out { public required Item Item; public string? Sha; public bool Hashing; public bool OnWire; public List<FolderEntry> Entries = []; }
     sealed class InFile
     {
-        public required string Id, Name, Sha; public long Size;
+        public required string Id, Name; public string? Sha; public long Size;
+        public string? Folder, Dir; public bool Acked;
         public string? Part; public FileStream? Stream; public IncrementalHash Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         public long Received; public string? Reject;
     }
+    sealed class InFolder
+    {
+        public required string Id, Name; public int Count; public long Size;
+        public string? Stage; public int Files; public long Bytes; public string? Reject; public bool Acked;
+    }
+    InFolder? _inFolder;
+    HashSet<string> _peerCaps = [];
+    string _peerName = "the other computer";
+    Updates.Available? _latestKnown;
 
     string _token;            // current secret (starts as Config.Token)
     string? _oldToken;        // the pairing code, still accepted after a rekey until restart
@@ -111,7 +136,10 @@ public sealed class Session : IDisposable
 
     sealed class FileSend
     {
-        public required string Id; public required FileStream Fs; public long Size; public required Link Link;
+        public required string Id, ItemId; public required FileStream Fs; public long Size; public required Link Link;
+        public IncrementalHash? Hasher;       // set when the SHA-256 goes in file_end
+        public long Base, Total;              // progress across a folder
+        public Action? Next;                  // inside a folder: what comes after this file
         public int InFlight; public long SentBytes; public bool Eof; public int LastStep = -1;
     }
     InFile? _in;
@@ -122,6 +150,7 @@ public sealed class Session : IDisposable
     {
         Role = role; Config = config; _handler = handler; _now = clock ?? (() => DateTime.UtcNow);
         _token = config.Token;
+        _latestKnown = config.LatestKnown;
         // A short token is a pairing code from 0.9.0-beta.1: upgrade it on the next connection too.
         _rekeyOnPair = config.RekeyOnPair || (config.Token.Length < 32 && role is Role.Listen);
     }
@@ -159,15 +188,58 @@ public sealed class Session : IDisposable
         long size = -1;
         try { size = new FileInfo(path).Length; } catch (Exception) { }
         var item = new Item(Guid.NewGuid().ToString(), false, null, Path.GetFileName(path), size, path, ItemState.Waiting);
-        _q.Post(() =>
-        {
-            Enqueue(new Out { Item = item });
-            Task.Run(() => Hashing.Sha256File(path)).ContinueWith(t => _q.Post(() => Hashed(item.Id, t)));
-        });
+        _q.Post(() => Enqueue(new Out { Item = item }));   // hashed while it streams (or first, for a beta.5 peer)
         return item;
     }
 
+    /// <summary>Send a whole folder as one item. Symlinks and junctions are left out (see ScanFolder).</summary>
+    public Item SendFolder(string path)
+    {
+        var scan = ScanFolder(path);
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+        var item = new Item(Guid.NewGuid().ToString(), false, null, name, scan.Size, path, ItemState.Waiting, scan.Count);
+        _q.Post(() => Enqueue(new Out { Item = item, Sha = "", Entries = scan.Entries }));
+        return item;
+    }
+
+    /// <summary>Walk a folder: every subfolder and file, parents first. Reparse points (symlinks, junctions) are never
+    /// followed or sent, since one could point outside the folder; they are counted in Skipped.</summary>
+    public static FolderScan ScanFolder(string root)
+    {
+        var entries = new List<FolderEntry>();
+        int count = 0, skipped = 0; long size = 0;
+        void Walk(DirectoryInfo dir, string rel)
+        {
+            FileSystemInfo[] items;
+            try { items = dir.GetFileSystemInfos(); } catch (Exception) { return; }
+            foreach (var fi in items.OrderBy(i => i.Name, StringComparer.Ordinal))
+            {
+                var r = rel.Length == 0 ? fi.Name : rel + "/" + fi.Name;
+                if (fi.Attributes.HasFlag(FileAttributes.ReparsePoint)) { skipped++; continue; }
+                if (fi is DirectoryInfo d) { entries.Add(new FolderEntry(r, null, 0)); Walk(d, r); }
+                else if (fi is FileInfo f) { entries.Add(new FolderEntry(r, f.FullName, f.Length)); count++; size += f.Length; }
+            }
+        }
+        Walk(new DirectoryInfo(root), "");
+        return new FolderScan(entries, count, size, skipped);
+    }
+
     public bool IsConnected => _q.Sync(() => _linkUp);
+
+    /// <summary>An update check found this: remember it, show it if it's newer, and tell the other computer.</summary>
+    public void NoteLatest(Updates.Available a) => _q.Post(() => Consider(a));
+
+    Frame VersionFrame() => Frame.VersionInfo(Config.AppVersion, _latestKnown is { } k ? new Frame.LatestKnownInfo(k.Version.ToString(), k.Url) : null);
+
+    /// <summary>Keep the newest version above our own; if it changed, say so and pass it on.</summary>
+    void Consider(Updates.Available a)
+    {
+        if (LanLineVersion.Parse(Config.AppVersion) is not { } own || !(a.Version > own) || !Updates.IsAllowedUrl(a.Url)) return;
+        if (_latestKnown is { } k && k.Version >= a.Version) return;
+        _latestKnown = a;
+        Emit(new SessionEvent.UpdateAvailable(a.Version.ToString(), a.Url));
+        if (_linkUp && _link is { } l) l.SendText(VersionFrame().Json);
+    }
 
     /// <summary>Liveness check; the timer calls it every TickInterval. Tests call it after moving the clock.</summary>
     public void Tick() => _q.Post(TickOnQueue);
@@ -246,7 +318,7 @@ public sealed class Session : IDisposable
                 if (ReferenceEquals(l, _dialing))
                 {
                     _dialHs = new DialerHandshake(_token, Config.Name);
-                    l.SendText(_dialHs.Hello.Json);
+                    l.SendText((_dialHs.Hello with { Caps = Config.Caps }).Json);   // outside the MAC: stripping it only means beta.5 behaviour
                 }
                 break;
             case LinkEventKind.Closed:
@@ -310,7 +382,8 @@ public sealed class Session : IDisposable
             _token = rekey;
         }
         else if (ans.SecretIndex == 1) rekey = _token;   // the dialer still has the pairing code: it missed the swap
-        l.SendText(ans.Ok.Json);
+        _peerCaps = [.. f.Caps ?? []];
+        l.SendText((ans.Ok with { Caps = Config.Caps }).Json);
         l.Secure = ans.Channel;   // everything after hello_ok is sealed
         if (rekey != null) l.SendText(Frame.RekeyTo(rekey).Json);
         if (Config.Advertise.Length > 0) l.SendText(Frame.Addresses(Config.Advertise).Json);
@@ -339,6 +412,7 @@ public sealed class Session : IDisposable
             return;
         }
         l.Secure = ch;
+        _peerCaps = [.. f.Caps ?? []];
         _dialHs = null;
         _dialing = null;
         _attempt = 0;
@@ -352,8 +426,10 @@ public sealed class Session : IDisposable
     {
         _link = l;
         _linkUp = true;
+        _peerName = peer;
         _lastHeard = _lastBeat = _now();
         Emit(new SessionEvent.Connected(peer));
+        if (Config.AppVersion.Length > 0) l.SendText(VersionFrame().Json);   // beta.5 ignores it
         Pump();
     }
 
@@ -365,6 +441,7 @@ public sealed class Session : IDisposable
         _busy = false;
         if (_fileSend is { } fsend) { fsend.Fs.Dispose(); _fileSend = null; }
         AbortIncoming();   // a half-received file is thrown away; the sender resends it
+        DropFolder();
         foreach (var o in _out.Where(o => o.OnWire))
         {
             o.OnWire = false;
@@ -411,11 +488,30 @@ public sealed class Session : IDisposable
                 break;
             case "file_begin" when f.Id != null:
                 AbortIncoming();
-                BeginFile(f.Id, f.Name ?? "file", f.Size ?? -1, (f.Sha256 ?? "").ToLowerInvariant());
+                if (f.Folder == null) DropFolder();
+                BeginFile(f.Id, f.Name ?? "file", f.Size ?? -1, f.Sha256?.ToLowerInvariant(), f.Folder, f.RelPath, l);
                 break;
             case "file_end" when f.Id != null && _in is { } file && file.Id == f.Id:
                 _in = null;
-                FinishFile(file, l);
+                FinishFile(file, f.Sha256?.ToLowerInvariant(), l);
+                break;
+            case "folder_begin" when f.Id != null:
+                AbortIncoming(); DropFolder();
+                BeginFolder(f.Id, f.Name ?? "folder", f.Count ?? -1, f.Size ?? -1, l);
+                break;
+            case "mkdir" when _inFolder is { Reject: null, Stage: { } stage } d && d.Id == f.Folder:
+                if (Names.SafePath(f.RelPath) is { } comps)
+                {
+                    var dir = Path.Combine([stage, .. comps]);
+                    if (File.Exists(dir)) d.Reject = "bad folder entry";
+                    else try { Directory.CreateDirectory(dir); } catch (Exception) { d.Reject = "cannot write"; }
+                }
+                else d.Reject = "bad path in folder";
+                break;
+            case "folder_end" when f.Id != null && _inFolder is { } fd && fd.Id == f.Id:
+                AbortIncoming();
+                _inFolder = null;
+                FinishFolder(fd, l);
                 break;
             case "rekey" when Role is Role.Dial && f.Token is { Length: 64 } r && r.All(Uri.IsHexDigit):
                 if (r != _token) { _token = r; Emit(new SessionEvent.Rekeyed(r)); }
@@ -424,6 +520,10 @@ public sealed class Session : IDisposable
                 var addrs = (f.Addrs ?? []).Where(IsIPv4).Take(8).ToArray();
                 if (addrs.Length > 0) Emit(new SessionEvent.PeerAddresses(addrs));
                 break;
+            case "version":   // the peer's version and the newest it knows of; strict parse, allowlisted links only
+                if (LanLineVersion.Parse(f.Version) is { } pv) Consider(new Updates.Available(pv, Updates.ReleasePage(pv)));
+                if (f.LatestKnown is { } lk && LanLineVersion.Parse(lk.Version) is { } kv && Updates.IsAllowedUrl(lk.Url)) Consider(new Updates.Available(kv, lk.Url));
+                break;
             case "ack" when f.Id != null:
                 var i = _out.FindIndex(o => o.Item.Id == f.Id);
                 if (i < 0) return;
@@ -431,6 +531,13 @@ public sealed class Session : IDisposable
                 _out.RemoveAt(i);
                 var st = f.Ok == true ? ItemState.Delivered : new ItemState(ItemStateKind.Failed, Error: f.Err ?? "rejected");
                 Emit(new SessionEvent.Outgoing(done.Item with { State = st }));
+                if (_fileSend is { } fsend && fsend.ItemId == f.Id)   // refused while streaming (too big): stop now
+                {
+                    _fileSend = null;
+                    fsend.Fs.Dispose();
+                    _busy = false;
+                    Pump();
+                }
                 break;
         }
     }
@@ -442,24 +549,98 @@ public sealed class Session : IDisposable
         catch (Exception) { return null; }
     }
 
-    void BeginFile(string id, string raw, long size, string sha)
+    static string Gb(long b) => b >= 1_000_000_000 ? $"{b / 1e9:0.#} GB" : b >= 1_000_000 ? $"{b / 1e6:0.#} MB" : $"{b / 1e3:0.#} KB";
+
+    string? NoSpace(long size) =>
+        FreeSpace() is { } free && size + Config.DiskReserve > free
+            ? $"not enough disk space on {Config.Name} (needs {Gb(size)}, {Gb(Math.Max(free - Config.DiskReserve, 0))} free)" : null;
+
+    /// <summary>A refusal the receiver can give at once, before any bytes: the sender stops and both windows say why.</summary>
+    void RefuseNow(string id, string name, string reason, Link l)
+    {
+        l.SendText(Frame.Ack(id, false, reason).Json);
+        Emit(new SessionEvent.ReceiveFailed(name, reason));
+    }
+
+    void BeginFile(string id, string raw, long size, string? sha, string? folder, string? path, Link l)
     {
         var name = Names.Sanitize(raw);
-        var f = new InFile { Id = id, Name = name, Sha = sha, Size = size };
-        if (size < 0 || size > Config.MaxFileSize) f.Reject = "too big or bad size";
-        else if (FreeSpace() is { } free && size + Config.DiskReserve > free) f.Reject = $"not enough disk space ({free / 1e9:0.0} GB free)";
-        else if (sha.Length != 64 || !sha.All(Uri.IsHexDigit)) f.Reject = "bad sha256";
-        else
+        var f = new InFile { Id = id, Name = name, Sha = sha, Size = size, Folder = folder };
+        if (folder != null)   // a file inside the folder being received
+        {
+            if (_inFolder is not { Reject: null, Stage: { } stage } d || d.Id != folder) { f.Reject = "not in a folder"; _in = f; return; }
+            d.Bytes += Math.Max(size, 0);
+            if (size < 0 || d.Bytes > d.Size) d.Reject = "folder bigger than announced";
+            else if (Names.SafePath(path) is { } comps) { f.Name = comps[^1]; f.Dir = Path.Combine([stage, .. comps[..^1]]); }
+            else d.Reject = "bad path in folder";
+            if (d.Reject != null) { f.Reject = d.Reject; _in = f; return; }
+        }
+        else if (size < 0 || size > Config.MaxFileSize) f.Reject = "too big or bad size";
+        else if (NoSpace(size) is { } r) f.Reject = r;
+        if (f.Reject == null && sha != null && (sha.Length != 64 || !sha.All(Uri.IsHexDigit))) f.Reject = "bad sha256";
+        if (f.Reject == null)
         {
             try
             {
-                Directory.CreateDirectory(Config.DownloadDir);
-                f.Part = Path.Combine(Config.DownloadDir, $".{name}.{Guid.NewGuid().ToString("N")[..8]}.part");
+                var dir = f.Dir ?? Config.DownloadDir;
+                Directory.CreateDirectory(dir);
+                f.Part = Path.Combine(dir, $".{f.Name}.{Guid.NewGuid().ToString("N")[..8]}.part");
                 f.Stream = new FileStream(f.Part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16);
             }
             catch (Exception e) { f.Reject = $"cannot write: {e.Message}"; }
         }
+        if (f.Reject is { } why && folder == null) { RefuseNow(id, name, why, l); f.Acked = true; }   // the sender stops now
         _in = f;
+    }
+
+    void BeginFolder(string id, string raw, int count, long size, Link l)
+    {
+        var name = Names.Sanitize(raw);
+        var d = new InFolder { Id = id, Name = name, Count = count, Size = size };
+        if (count < 0 || count > 1_000_000 || size < 0 || size > Config.MaxFileSize) d.Reject = "too big or bad size";
+        else if (NoSpace(size) is { } r) d.Reject = r;
+        else
+        {
+            var stage = Path.Combine(Config.DownloadDir, $".{name}.{Guid.NewGuid().ToString("N")[..8]}.part");
+            try { Directory.CreateDirectory(stage); d.Stage = stage; } catch (Exception) { d.Reject = "cannot write"; }
+        }
+        if (d.Reject is { } why) { RefuseNow(id, name, why, l); d.Acked = true; }
+        _inFolder = d;
+    }
+
+    void DropFolder()
+    {
+        if (_inFolder?.Stage is { } st) try { Directory.Delete(st, true); } catch (Exception) { }
+        _inFolder = null;
+    }
+
+    void FinishFolder(InFolder d, Link l)
+    {
+        if (d.Reject == null && d.Files != d.Count) d.Reject = "folder incomplete";
+        if (d.Reject is { } why)
+        {
+            if (d.Stage != null) try { Directory.Delete(d.Stage, true); } catch (Exception) { }
+            if (!d.Acked) RefuseNow(d.Id, d.Name, why, l);
+            return;
+        }
+        if (d.Stage is not { } stage) return;
+        if (_done.Contains(d.Id))
+        {
+            try { Directory.Delete(stage, true); } catch (Exception) { }
+            l.SendText(Frame.Ack(d.Id, true).Json);
+            return;
+        }
+        var dest = Names.Unique(d.Name, Config.DownloadDir);
+        try { Directory.Move(stage, dest); }
+        catch (Exception)
+        {
+            try { Directory.Delete(stage, true); } catch (Exception) { }
+            RefuseNow(d.Id, d.Name, "save failed", l);
+            return;
+        }
+        _done.Add(d.Id);
+        l.SendText(Frame.Ack(d.Id, true).Json);
+        Emit(new SessionEvent.Received(new Item(d.Id, true, null, Path.GetFileName(dest), d.Size, dest, ItemState.ReceivedState, d.Count)));
     }
 
     void HandleChunk(byte[] d)
@@ -485,22 +666,36 @@ public sealed class Session : IDisposable
         _in = null;
     }
 
-    void FinishFile(InFile f, Link l)
+    void FinishFile(InFile f, string? endSha, Link l)
     {
         var reason = f.Reject;
         if (reason == null && f.Received != f.Size) reason = "size mismatch";
         var digest = Convert.ToHexStringLower(f.Hasher.GetHashAndReset());
-        if (reason == null && digest != f.Sha) reason = "sha256 mismatch";
+        if (reason == null && digest != (f.Sha ?? endSha)) reason = "sha256 mismatch";
         try { f.Stream?.Dispose(); } catch (Exception) { }
         f.Stream = null;
         if (reason != null)
         {
             DropPart(f);
-            l.SendText(Frame.Ack(f.Id, false, reason).Json);
-            Emit(new SessionEvent.ReceiveFailed(f.Name, reason));
+            if (f.Folder != null)   // the whole folder fails; folder_end answers
+            {
+                if (_inFolder is { Reject: null } d && d.Id == f.Folder) d.Reject = $"{f.Name}: {reason}";
+                return;
+            }
+            if (!f.Acked)
+            {
+                l.SendText(Frame.Ack(f.Id, false, reason).Json);
+                Emit(new SessionEvent.ReceiveFailed(f.Name, reason));
+            }
             return;
         }
         if (f.Part is not { } part) return;
+        if (f.Dir is { } fdir)   // inside a folder: put it in place, count it
+        {
+            try { File.Move(part, Names.Unique(f.Name, fdir)); if (_inFolder != null) _inFolder.Files++; }
+            catch (Exception) { try { File.Delete(part); } catch (Exception) { } if (_inFolder != null) _inFolder.Reject = "save failed"; }
+            return;
+        }
         if (_done.Contains(f.Id))   // a resend of something we already saved
         {
             try { File.Delete(part); } catch (Exception) { }
@@ -534,6 +729,7 @@ public sealed class Session : IDisposable
     {
         var o = _out.Find(x => x.Item.Id == id);
         if (o == null) return;
+        o.Hashing = false;
         if (t.IsCompletedSuccessfully) o.Sha = t.Result;
         else
         {
@@ -544,43 +740,93 @@ public sealed class Session : IDisposable
         Pump();
     }
 
+    void Fail(string id, string reason)
+    {
+        if (_out.Find(x => x.Item.Id == id) is { } o)
+        {
+            _out.Remove(o);
+            Emit(new SessionEvent.Outgoing(o.Item with { State = new ItemState(ItemStateKind.Failed, Error: reason) }));
+        }
+        _busy = false;
+        Pump();
+    }
+
     /// <summary>Put the next queued item on the wire: one item at a time, in order.</summary>
     void Pump()
     {
         if (!_linkUp || _busy || _link is not { } l) return;
         var o = _out.Find(x => !x.OnWire);
-        if (o == null || o.Sha == null) return;   // nothing queued, or first in line is still hashing
+        if (o == null) return;
+        var item = o.Item;
+        var shaEnd = _peerCaps.Contains("sha_end");
+        if (item.IsFile && !item.IsFolder && !shaEnd && o.Sha == null)   // a beta.5 peer wants the hash first
+        {
+            if (!o.Hashing)
+            {
+                o.Hashing = true;
+                var path = item.Path!;
+                Task.Run(() => Hashing.Sha256File(path)).ContinueWith(t => _q.Post(() => Hashed(item.Id, t)));
+            }
+            return;
+        }
         o.OnWire = true;
         _busy = true;
-        var item = o.Item;
         if (!item.IsFile)
         {
             l.SendText(Frame.TextItem(item.Id, item.Text!).Json, ok => Wrote(item.Id, l, ok));
             return;
         }
-        FileStream fs;
-        long size;
-        try
+        if (item.IsFolder)
         {
-            fs = new FileStream(item.Path!, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
-            size = fs.Length;
-        }
-        catch (Exception e)
-        {
-            _out.Remove(o);
-            _busy = false;
-            Emit(new SessionEvent.Outgoing(item with { State = new ItemState(ItemStateKind.Failed, Error: $"cannot read: {e.Message}") }));
-            Pump();
+            if (!_peerCaps.Contains("folders")) { Fail(item.Id, $"Update Lan-Line on {_peerName} to send folders"); return; }
+            l.SendText(Frame.FolderBegin(item.Id, item.FileName!, item.Count!.Value, item.Size).Json);
+            FolderStep(item.Id, o.Entries, 0, 0, item.Size, l);
             return;
         }
-        l.SendText(Frame.FileBegin(item.Id, item.FileName!, size, o.Sha).Json);
-        _fileSend = new FileSend { Id = item.Id, Fs = fs, Size = size, Link = l };
+        FileStream fs;
+        try { fs = new FileStream(item.Path!, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16); }
+        catch (Exception e) { Fail(item.Id, $"cannot read: {e.Message}"); return; }
+        var size = fs.Length;
+        l.SendText(Frame.FileBegin(item.Id, item.FileName!, size, shaEnd ? null : o.Sha).Json);
+        _fileSend = new FileSend { Id = item.Id, ItemId = item.Id, Fs = fs, Size = size, Link = l, Total = size,
+                                   Hasher = shaEnd ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null };
+        FillWindow(_fileSend);
+    }
+
+    /// <summary>Send a folder's entries from start on: folders as mkdir, then the next file; its end continues here.</summary>
+    void FolderStep(string itemId, List<FolderEntry> entries, int start, long baseBytes, long total, Link l)
+    {
+        if (!ReferenceEquals(l, _link) || !_linkUp) return;                                   // resent after reconnect
+        if (!_out.Exists(x => x.Item.Id == itemId)) { _busy = false; Pump(); return; }        // refused
+        var idx = start;
+        while (idx < entries.Count && entries[idx].FullPath == null) { l.SendText(Frame.Mkdir(itemId, entries[idx].RelPath).Json); idx++; }
+        if (idx == entries.Count) { l.SendText(Frame.FolderEnd(itemId).Json, ok => Wrote(itemId, l, ok)); return; }
+        var e = entries[idx];
+        FileStream fs;
+        try { fs = new FileStream(e.FullPath!, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16); }
+        catch (Exception)
+        {
+            l.SendText(Frame.FolderEnd(itemId).Json);   // the receiver throws the partial folder away
+            Fail(itemId, $"cannot read {e.RelPath}");
+            return;
+        }
+        var size = fs.Length;
+        var sub = Guid.NewGuid().ToString();
+        l.SendText(Frame.FileBegin(sub, Path.GetFileName(e.FullPath!), size, null, itemId, e.RelPath).Json);
+        var next = idx + 1;
+        _fileSend = new FileSend
+        {
+            Id = sub, ItemId = itemId, Fs = fs, Size = size, Link = l, Base = baseBytes, Total = total,
+            Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256),
+            Next = () => FolderStep(itemId, entries, next, baseBytes + size, total, l),
+        };
         FillWindow(_fileSend);
     }
 
     void FillWindow(FileSend f)
     {
         if (!ReferenceEquals(f, _fileSend) || !ReferenceEquals(f.Link, _link) || !_linkUp) return;   // resent later
+        if (!_out.Exists(x => x.Item.Id == f.ItemId)) { _fileSend = null; f.Fs.Dispose(); _busy = false; Pump(); return; }   // refused
         while (f.InFlight < Window && !f.Eof)
         {
             byte[] chunk;
@@ -598,17 +844,19 @@ public sealed class Session : IDisposable
                 return;
             }
             if (chunk.Length == 0) { f.Eof = true; break; }
+            f.Hasher?.AppendData(chunk);
             f.InFlight++;
             f.Link.SendData(chunk, ok =>
             {
                 f.InFlight--;
                 if (!ok || !ReferenceEquals(f, _fileSend)) return;
                 f.SentBytes += chunk.Length;
-                var step = f.Size > 0 ? (int)(f.SentBytes * 20 / f.Size) : 20;   // progress in 5 % steps
-                if (step != f.LastStep && _out.Find(x => x.Item.Id == f.Id) is { } o)
+                var done = f.Base + f.SentBytes;
+                var step = f.Total > 0 ? (int)(done * 20 / f.Total) : 20;   // progress in 5 % steps
+                if (step != f.LastStep && _out.Find(x => x.Item.Id == f.ItemId) is { } o)
                 {
                     f.LastStep = step;
-                    o.Item = o.Item with { State = new ItemState(ItemStateKind.Sending, (double)f.SentBytes / Math.Max(f.Size, 1)) };
+                    o.Item = o.Item with { State = new ItemState(ItemStateKind.Sending, (double)done / Math.Max(f.Total, 1)) };
                     Emit(new SessionEvent.Outgoing(o.Item));
                 }
                 FillWindow(f);
@@ -619,7 +867,12 @@ public sealed class Session : IDisposable
             _fileSend = null;
             f.Fs.Dispose();
             var l = f.Link;
-            l.SendText(Frame.FileEnd(f.Id).Json, ok => Wrote(f.Id, l, ok));
+            var sha = f.Hasher is { } h ? Convert.ToHexStringLower(h.GetHashAndReset()) : null;
+            l.SendText(Frame.FileEnd(f.Id, sha).Json, ok =>
+            {
+                if (f.Next is { } next) { if (ok && ReferenceEquals(l, _link)) next(); }
+                else Wrote(f.ItemId, l, ok);
+            });
         }
     }
 

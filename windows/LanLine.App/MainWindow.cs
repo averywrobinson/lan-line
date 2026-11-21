@@ -18,7 +18,7 @@ sealed partial class MainWindow : Window
 {
     internal const string Glyph_Copy = "", Glyph_Check = "", Glyph_Clock = "", Glyph_Error = "",
         Glyph_Pin = "", Glyph_Unpin = "", Glyph_Min = "", Glyph_Max = "", Glyph_Restore = "",
-        Glyph_Close = "", Glyph_Up = "", Glyph_Doc = "", Glyph_Upload = "", Glyph_More = "";
+        Glyph_Close = "", Glyph_Up = "", Glyph_Doc = "", Glyph_Upload = "", Glyph_More = "", Glyph_Folder = "\uE8B7";
 
     Session? _session;
     readonly Ellipse _dot = new() { Width = 7, Height = 7, Margin = new Thickness(0, 1, 6, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -300,6 +300,7 @@ sealed partial class MainWindow : Window
             case SessionEvent.Listening: _statusText = $"Waiting for {Away}…"; break;
             case SessionEvent.Rekeyed rk: Rekeyed(rk.Token); break;
             case SessionEvent.PeerAddresses pa: PeerAddresses(pa.Addrs); break;
+            case SessionEvent.UpdateAvailable ua: RememberLatest(ua.Version, ua.Url); ShowUpdate(ua.Version, ua.Url); break;
             case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
             case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
             case SessionEvent.Status s: if (!_connected) _statusText = StatusLine(s.Text, Away); break;
@@ -354,6 +355,29 @@ sealed partial class MainWindow : Window
         t.Start();
     }
 
+    FrameworkElement? _updateRow;
+
+    /// <summary>One quiet, dismissible "Lan-Line X is available · Download ×" row. It opens the release page in the
+    /// browser; Lan-Line never downloads anything itself. A newer notice replaces an older one.</summary>
+    void ShowUpdate(string version, string url)
+    {
+        if (!Updates.IsAllowedUrl(url)) return;
+        if (_updateRow != null) _feed.Children.Remove(_updateRow);
+        var text = new TextBlock { Text = $"Lan-Line {version} is available", FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        text.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        var dl = new Button { Content = "Download", FontSize = 11, Margin = new Thickness(8, 0, 0, 0), ToolTip = url };
+        dl.SetResourceReference(StyleProperty, "LinkButton");
+        dl.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        var x = new Button { Content = Glyph_Close, FontFamily = (FontFamily)Application.Current.Resources["IconFont"], FontSize = 9, Margin = new Thickness(8, 0, 0, 0), ToolTip = "Dismiss" };
+        x.SetResourceReference(StyleProperty, "LinkButton");
+        System.Windows.Automation.AutomationProperties.SetName(x, "Dismiss update notice");
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 6) };
+        row.Children.Add(text); row.Children.Add(dl); row.Children.Add(x);
+        x.Click += (_, _) => { _feed.Children.Remove(row); _updateRow = null; RefreshEmpty(); };
+        _updateRow = row;
+        Append(row);
+    }
+
     void Note(string s)
     {
         var t = new TextBlock { Text = s, FontSize = 11, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 2, 0, 6) };
@@ -392,7 +416,13 @@ sealed partial class MainWindow : Window
         foreach (var p in paths)
         {
             if (IsOwn(p)) continue;
-            if (Directory.Exists(p)) { Note($"Folders can't be sent yet: {System.IO.Path.GetFileName(p)}"); continue; }
+            if (Directory.Exists(p))
+            {
+                var skipped = Session.ScanFolder(p).Skipped;
+                Upsert(_session.SendFolder(p));
+                if (skipped > 0) Note($"{System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(p))}: {skipped} shortcut{(skipped == 1 ? "" : "s")} (links) left out");
+                continue;
+            }
             if (File.Exists(p)) Upsert(_session.SendFile(p));
         }
     }

@@ -286,7 +286,7 @@ final class SessionTests: XCTestCase {
             crec.connectedCount == 2 && [a, f, b].allSatisfy { crec.lastState($0.id) == .delivered }
         }
         let kinds = srec.received.map { item -> String in
-            switch item.kind { case .text(let t): return t; case .file(let n, _, _): return n }
+            switch item.kind { case .text(let t): return t; case .file(let n, _, _), .folder(let n, _, _, _): return n }
         }
         XCTAssertEqual(kinds, ["during outage 1", "queued.bin", "during outage 2"], "in order, exactly once")
     }

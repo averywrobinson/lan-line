@@ -55,7 +55,8 @@ sealed class ItemRow
         {
             var name = new TextBlock { Text = item.FileName, FontSize = 13, FontWeight = FontWeights.Medium, TextTrimming = TextTrimming.CharacterEllipsis };
             name.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-            var size = _sizeText = new TextBlock { Text = FormatSize(item.Size), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
+            var detail = item.IsFolder ? $"{item.Count} file{(item.Count == 1 ? "" : "s")} · {FormatSize(item.Size)}" : FormatSize(item.Size);
+            var size = _sizeText = new TextBlock { Text = detail, FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
             size.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
             var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(11, 0, 8, 0), MinWidth = 90 };
             names.Children.Add(name);
@@ -143,7 +144,7 @@ sealed class ItemRow
             _progress.Value = item.State.Progress;
         }
         System.Windows.Automation.AutomationProperties.SetName(View,
-            $"{(item.Incoming ? "Received" : "Sent")} {(item.IsFile ? "file " + item.FileName : "text")} ({item.State.Kind})");
+            $"{(item.Incoming ? "Received" : "Sent")} {(item.IsFolder ? $"folder {item.FileName}, {item.Count} files" : item.IsFile ? "file " + item.FileName : "text")} ({item.State.Kind})");
     }
 
     static ContextMenu Menu(params (string Label, Action Do)[] items)
@@ -172,7 +173,12 @@ sealed class ItemRow
         t.Start();
     }
 
-    void Open() { if (_item.Path is { } p && File.Exists(p)) Process.Start(new ProcessStartInfo(p) { UseShellExecute = true }); }
+    void Open()
+    {
+        if (_item.Path is not { } p) return;
+        if (Directory.Exists(p)) Process.Start("explorer.exe", $"\"{p}\"");
+        else if (File.Exists(p)) Process.Start(new ProcessStartInfo(p) { UseShellExecute = true });
+    }
     void Reveal() { if (_item.Path is { } p) Process.Start("explorer.exe", $"/select,\"{p}\""); }
 
     /// <summary>A real thumbnail for images, the shell's icon for other files.</summary>
@@ -210,7 +216,7 @@ sealed class ItemRow
         }
         if (src == null)
         {
-            var glyph = new TextBlock { Text = MainWindow.Glyph_Doc, FontSize = 26, Width = 36, Height = 36, TextAlignment = TextAlignment.Center,
+            var glyph = new TextBlock { Text = path != null && Directory.Exists(path) ? MainWindow.Glyph_Folder : MainWindow.Glyph_Doc, FontSize = 26, Width = 36, Height = 36, TextAlignment = TextAlignment.Center,
                                         FontFamily = (FontFamily)Application.Current.Resources["IconFont"], Padding = new Thickness(0, 4, 0, 0) };
             glyph.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
             return glyph;

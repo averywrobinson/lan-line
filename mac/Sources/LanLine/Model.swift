@@ -1,13 +1,15 @@
 import AppKit
 import SwiftUI
 import LanLineCore
-import Observation
+import Combine
 
 /// One feed row: an item (text or file, either direction) or a small note.
 struct Row: Identifiable {
     let id: String
     var item: Item?
     var note: String?
+    /// An update notice: the release page it links to (Lan-Line never downloads anything itself).
+    var link: URL?
 }
 
 /// Pairing screen state. `show` = this computer shows a code and waits; `enter` = it types the other's code.
@@ -15,46 +17,46 @@ enum PairMode { case show, enter }
 
 /// Everything the window shows. Lives on the main thread; the Session's events reach it through
 /// the one hop in `AppController.startSession`.
-@MainActor @Observable
-final class AppModel {
-    var rows: [Row] = []
-    var connected = false
-    var peer = ""
-    var status = "Starting…"
-    var pinned = true
-    var draftEmpty = true
-    var dropTargeted = false
+@MainActor
+final class AppModel: ObservableObject {
+    @Published var rows: [Row] = []
+    @Published var connected = false
+    @Published var peer = ""
+    @Published var status = "Starting…"
+    @Published var pinned = true
+    @Published var draftEmpty = true
+    @Published var dropTargeted = false
     /// Translucent window (off for snapshots, which can't capture the blur).
-    var glass = false
+    @Published var glass = false
 
     // storage settings (shown over everything until the user has saved them once)
-    var showingSettings = false
-    var settingsFirstRun = false
-    var storage = StorageSettings()
-    var usageBytes: Int64 = 0
-    var unmanagedCount = 0
-    var unmanagedBytes: Int64 = 0
-    var removedPaths: Set<String> = []
+    @Published var showingSettings = false
+    @Published var settingsFirstRun = false
+    @Published var storage = StorageSettings()
+    @Published var usageBytes: Int64 = 0
+    @Published var unmanagedCount = 0
+    @Published var unmanagedBytes: Int64 = 0
+    @Published var removedPaths: Set<String> = []
 
     // pairing
-    var pairing = false
-    var pairMode: PairMode = .show
-    var pairCode = ""
-    var myName = ""
-    var myAddresses: [String] = []
-    var found: [DiscoveredPeer] = []
-    var searching = false
-    var typedAddress = ""
-    var typedCode = ""
-    var pairError: String?
-    var pairBusy = false
-    var canCancelPairing = false
+    @Published var pairing = false
+    @Published var pairMode: PairMode = .show
+    @Published var pairCode = ""
+    @Published var myName = ""
+    @Published var myAddresses: [String] = []
+    @Published var found: [DiscoveredPeer] = []
+    @Published var searching = false
+    @Published var typedAddress = ""
+    @Published var typedCode = ""
+    @Published var pairError: String?
+    @Published var pairBusy = false
+    @Published var canCancelPairing = false
 
-    @ObservationIgnored var session: Session?
-    @ObservationIgnored var onPopUp: () -> Void = {}
-    @ObservationIgnored var onPin: (Bool) -> Void = { _ in }
-    @ObservationIgnored var pairActions = PairActions()
-    @ObservationIgnored var settingsActions = SettingsActions()
+    var session: Session?
+    var onPopUp: () -> Void = {}
+    var onPin: (Bool) -> Void = { _ in }
+    var pairActions = PairActions()
+    var settingsActions = SettingsActions()
     private let maxRows = 200
 
     var peerLabel: String { peer.isEmpty ? "your other computer" : peer }
@@ -75,6 +77,7 @@ final class AppModel {
         case .receiveFailed(let name, let reason): note("Couldn't receive \(name): \(reason)"); onPopUp()
         case .error(let msg): if !pairing { note(msg) }
         case .rekeyed, .peerAddresses: break   // the controller saves these
+        case .updateAvailable(let v, let u): showUpdate(version: v, url: u)
         }
     }
 
@@ -91,6 +94,15 @@ final class AppModel {
         if s.contains("newer Lan-Line") { return "Update Lan-Line on this Mac" }
         return "Can't reach \(away)"
     }
+
+    /// One quiet, dismissible "Lan-Line X is available: Download" row (a newer notice replaces an older one).
+    func showUpdate(version: String, url: String) {
+        guard Updates.isAllowedURL(url), let link = URL(string: url) else { return }
+        rows.removeAll { $0.link != nil }
+        append(Row(id: "update", note: "Lan-Line \(version) is available", link: link))
+    }
+
+    func dismiss(_ id: String) { withAnimation(.easeOut(duration: 0.2)) { rows.removeAll { $0.id == id } } }
 
     func note(_ s: String, fadeAfter: TimeInterval? = nil) {
         let id = UUID().uuidString
@@ -109,7 +121,7 @@ final class AppModel {
 
     /// When a file chip was last dragged out of this window. A drop of that same file soon after is the chip
     /// coming back (ignore it); the same file dropped or pasted from Finder is a real resend (send it).
-    @ObservationIgnored var chipDragAt: Date?
+    var chipDragAt: Date?
 
     /// True only for a chip dragged out of this window and dropped back on it.
     func isChipDraggedBack(_ url: URL) -> Bool {
@@ -120,7 +132,12 @@ final class AppModel {
 
     /// True when the URL is one of our own feed items.
     func isOwn(_ url: URL) -> Bool {
-        rows.contains { if case .file(_, _, let u)? = $0.item?.kind { return u.standardizedFileURL == url.standardizedFileURL }; return false }
+        rows.contains {
+            switch $0.item?.kind {
+            case .file(_, _, let u)?, .folder(_, _, _, let u)?: return u.standardizedFileURL == url.standardizedFileURL
+            default: return false
+            }
+        }
     }
 
     // MARK: sending
@@ -148,7 +165,13 @@ final class AppModel {
                 note("Couldn't read \(u.lastPathComponent): \(why)")
                 continue
             }
-            if isDir.boolValue { note("Folders can't be sent yet: \(u.lastPathComponent)"); continue }
+            if isDir.boolValue {
+                DebugLog.write("sending folder \(u.path)")
+                let skipped = Session.scanFolder(u).skipped
+                upsert(s.send(folder: u))
+                if skipped > 0 { note("\(u.lastPathComponent): \(skipped) shortcut\(skipped == 1 ? "" : "s") (symlinks) left out", fadeAfter: 8) }
+                continue
+            }
             DebugLog.write("sending \(u.path)")
             upsert(s.send(file: u))
         }

@@ -20,6 +20,12 @@ public sealed class StorageSettings
     [JsonPropertyName("confirmed")] public bool Confirmed { get; set; }
     [JsonPropertyName("lastTrashReminder")] public DateTime? LastTrashReminder { get; set; }
     [JsonPropertyName("lastLimitWarning")] public DateTime? LastLimitWarning { get; set; }
+    /// <summary>"Check for updates automatically once a day". Off unless the user turns it on (null = never set = off).</summary>
+    [JsonPropertyName("autoUpdateCheck")] public bool? AutoUpdateCheck { get; set; }
+    [JsonPropertyName("lastUpdateCheck")] public DateTime? LastUpdateCheck { get; set; }
+    /// <summary>The newest version this computer heard of (update check or the other computer), and its page.</summary>
+    [JsonPropertyName("latestVersion")] public string? LatestVersion { get; set; }
+    [JsonPropertyName("latestURL")] public string? LatestUrl { get; set; }
 
     public static readonly int[] RetentionChoices = [0, 1, 10, 30, 60, 90];
     public static readonly double[] LimitChoices = [0, 5, 10, 25, 50, 100];

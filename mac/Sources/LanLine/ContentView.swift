@@ -4,7 +4,7 @@ import ImageIO
 import LanLineCore
 
 struct ContentView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     private var p: Palette { .of(scheme) }
 
@@ -53,7 +53,7 @@ private struct Background: View {
 // MARK: header
 
 private struct Header: View {
-    let model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     @State private var pinHover = false
 
@@ -101,7 +101,7 @@ private struct Header: View {
 // MARK: feed
 
 private struct FeedView: View {
-    let model: AppModel
+    @ObservedObject var model: AppModel
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -113,10 +113,11 @@ private struct FeedView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
             }
-            .defaultScrollAnchor(.bottom)
+            .bottomAnchored()
             .scrollIndicators(.automatic)
+            .onAppear { if let last = model.rows.last?.id { proxy.scrollTo(last, anchor: .bottom) } }   // macOS 13 has no default anchor
             .overlay { if model.rows.isEmpty { EmptyState(model: model) } }
-            .onChange(of: model.rows.count) {
+            .onChange(of: model.rows.count) { _ in
                 if let last = model.rows.last?.id { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last, anchor: .bottom) } }
             }
         }
@@ -124,7 +125,7 @@ private struct FeedView: View {
 }
 
 private struct EmptyState: View {
-    let model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         let p = Palette.of(scheme)
@@ -145,11 +146,13 @@ private struct EmptyState: View {
 
 private struct RowView: View {
     let row: Row
-    let model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        if let note = row.note {
+        if let note = row.note, let link = row.link {
+            UpdateNote(text: note, link: link) { model.dismiss(row.id) }
+        } else if let note = row.note {
             Text(note)
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.of(scheme).textSecondary)
@@ -161,11 +164,34 @@ private struct RowView: View {
                 switch item.kind {
                 case .text(let t): TextBubble(item: item, text: t)
                 case .file(let name, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model)
+                case .folder(let name, let count, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model, count: count)
                 }
                 if item.incoming { Spacer(minLength: 44) }
             }
             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
         }
+    }
+}
+
+/// "Lan-Line X is available · Download ×": opens the release page in the browser, nothing more.
+private struct UpdateNote: View {
+    let text: String
+    let link: URL
+    let dismiss: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let p = Palette.of(scheme)
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle").font(.system(size: 11)).foregroundStyle(p.icon)
+            Text(text).font(.system(size: 11)).foregroundStyle(p.textSecondary)
+            Button("Download") { NSWorkspace.shared.open(link) }
+                .buttonStyle(.link).font(.system(size: 11, weight: .medium))
+                .help(link.absoluteString)
+            Button(action: dismiss) { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
+                .buttonStyle(.plain).foregroundStyle(p.icon).help("Dismiss")
+                .accessibilityLabel("Dismiss update notice")
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -257,10 +283,17 @@ private struct FileCard: View {
     let name: String
     let size: Int64
     let url: URL
-    let model: AppModel
+    @ObservedObject var model: AppModel
+    var count: Int? = nil          // a folder: how many files are inside
     @Environment(\.colorScheme) private var scheme
 
     private var removed: Bool { model.removedPaths.contains(url.path) }
+    private var detail: String {
+        if removed { return "Moved to Trash" }
+        let bytes = ByteCountFormatter.string(fromByteCount: max(size, 0), countStyle: .file)
+        guard let count else { return bytes }
+        return "\(count) file\(count == 1 ? "" : "s") · \(bytes)"
+    }
 
     var body: some View {
         let p = Palette.of(scheme)
@@ -273,7 +306,7 @@ private struct FileCard: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(p.text)
                         .lineLimit(1).truncationMode(.middle)
-                    Text(removed ? "Moved to Trash" : ByteCountFormatter.string(fromByteCount: max(size, 0), countStyle: .file))
+                    Text(detail)
                         .font(.system(size: 11))
                         .foregroundStyle(p.textSecondary)
                 }
@@ -306,7 +339,7 @@ private struct FileCard: View {
         }
         .help("Double-click to open. Drag out to copy.")
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(item.incoming ? "Received" : "Sent") file: \(name)")
+        .accessibilityLabel("\(item.incoming ? "Received" : "Sent") \(count == nil ? "file" : "folder"): \(name), \(detail)")
         .accessibilityAction(named: "Open") { NSWorkspace.shared.open(url) }
     }
 }
@@ -374,5 +407,12 @@ private struct DropOverlay: View {
             )
             .padding(8)
             .allowsHitTesting(false)
+    }
+}
+
+private extension View {
+    /// Start scrolled to the newest row (macOS 14+); macOS 13 scrolls there on appear instead.
+    @ViewBuilder func bottomAnchored() -> some View {
+        if #available(macOS 14.0, *) { self.defaultScrollAnchor(.bottom) } else { self }
     }
 }

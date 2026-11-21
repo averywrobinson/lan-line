@@ -3,7 +3,7 @@ import LanLineCore
 
 /// First run (and "Pair with Another Computer…"): show a code here, or type the other computer's code.
 struct PairingView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -47,7 +47,7 @@ struct PairingView: View {
 }
 
 private struct ShowCode: View {
-    let model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     @State private var copied = false
 
@@ -98,7 +98,7 @@ private struct ShowCode: View {
 }
 
 private struct EnterCode: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -170,7 +170,7 @@ private struct Field: View {
         let p = Palette.of(scheme)
         HStack(spacing: 10) {
             Text(label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(p.textSecondary).frame(width: 52, alignment: .leading)
-            TextField("", text: $text, prompt: Text(prompt).foregroundStyle(p.textSecondary.opacity(0.6)))
+            TextField("", text: $text, prompt: Text(prompt).foregroundColor(p.textSecondary.opacity(0.6)))
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, design: mono ? .monospaced : .default))
                 .foregroundStyle(p.text)

@@ -3,7 +3,7 @@ import AppKit
 
 /// The rounded message box with the round send button inside it.
 struct Composer: View {
-    let model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     @State private var height: CGFloat = 20
     @State private var field = FieldHandle()

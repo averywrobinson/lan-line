@@ -3,11 +3,17 @@
 # Signs with the "Lan-Line Dev" identity if it exists (keeps the firewall allow across rebuilds), else ad-hoc.
 set -euo pipefail
 cd "$(dirname "$0")"
-swift build -c release -Xswiftc -warnings-as-errors 2>&1 | tail -3
-BIN="$(swift build -c release --show-bin-path)/LanLine"
+# Universal binary: Apple Silicon (arm64) and Intel (x86_64) in one app.
+ARCHS=(--arch arm64 --arch x86_64)
+swift build -c release "${ARCHS[@]}" -Xswiftc -warnings-as-errors 2>&1 | tail -3
+BIN="$(swift build -c release "${ARCHS[@]}" --show-bin-path)/LanLine"
+case "$(lipo -archs "$BIN")" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "not universal: $(lipo -archs "$BIN")"; exit 1 ;; esac
 APP=".build/Lan-Line.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Lan-Line"
+# Drop debug symbols: their debug map names this machine's build folders (home folder path).
+strip -S -x "$APP/Contents/MacOS/Lan-Line"
+if LC_ALL=C grep -a -q "$HOME" "$APP/Contents/MacOS/Lan-Line"; then echo "binary still contains $HOME"; exit 1; fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 FULL="$(cat ../VERSION)"                       # e.g. 0.9.0-beta.1
 VERSION="${FULL%%-*}"                          # 0.9.0
@@ -26,7 +32,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${BUILD}</string>
   <key>LanLineVersion</key><string>${FULL}</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

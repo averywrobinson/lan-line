@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using LanLine.Core;
 
-if (args.Length > 0 && (args[0] == "headless" || args[0] == "selftest"))
+if (args.Length > 0 && (args[0] == "headless" || args[0] == "selftest" || args[0] == "check-updates"))
     return Headless.Run(["--" + args[0], .. args[1..]]);
 
 if (args.Length >= 3 && args[0] == "tcpread")   // diagnostics: read a raw TCP stream to EOF and time it
@@ -37,6 +37,12 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("v2 shared test vectors", T.CryptoVectors), ("v2 handshake refusals", T.HandshakeRefusals),
     ("v2 channel tamper, replay, reorder", T.ChannelTamper), ("v2 nothing readable on the wire", T.WireCapture),
     ("v2 live link closes on tamper or plaintext", T.LiveTamper), ("v2 dialer with wrong secret refused", T.WrongSecretDialer),
+    ("too big refused before hashing", T.TooBigEarly), ("over sanity bound refused", T.OverBound), ("beta.5 peers still get files", T.OldPeers),
+    ("folder both ways and clash", T.FolderBothWays), ("large folder tree", T.LargeTree), ("folder links skipped", T.FolderLinks),
+    ("folder too big refused up front", T.FolderTooBig), ("folder to beta.5 peer says update", T.FolderOldPeer), ("folder path escape refused", T.FolderEscape),
+    ("version parse and order", T.VersionOrder), ("update url allowlist", T.UrlAllowlist), ("version.json parse", T.VersionJson),
+    ("failed update checks are quiet", T.ChecksQuiet), ("auto update check off by default", T.AutoOff),
+    ("peer relays newer version", T.PeerRelay), ("peer version alone links release page", T.PeerVersionOnly), ("peer can't push bad links", T.PeerBadLinks),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -868,5 +874,297 @@ static class T
         cli.Start();
         await H.Until(() => crec.All.OfType<SessionEvent.Status>().Any(x => x.Text == "Refused: the other computer doesn't know this pairing. Pair again."), "refusal", 5);
         H.Eq(0, crec.Connects, "dialer never connected"); H.Eq(0, srec.Connects, "listener never connected");
+    }
+
+    // ---------- beta.6: caps, too-big refused up front, folders ----------
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle h, uint code, IntPtr inBuf, uint inSize, IntPtr outBuf, uint outSize, out uint ret, IntPtr ov);
+
+    /// <summary>A sparse file: takes no real disk space, but hashing it would read every byte.</summary>
+    static string Sparse(string dir, string name, long size)
+    {
+        var p = Path.Combine(dir, name);
+        using var fs = new FileStream(p, FileMode.Create, FileAccess.ReadWrite);
+        if (!DeviceIoControl(fs.SafeFileHandle, 0x000900C4 /* FSCTL_SET_SPARSE */, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
+            throw new Exception("could not mark the file sparse");
+        fs.SetLength(size);
+        return p;
+    }
+
+    static async Task<(Session S, Recorder SR, Session C, Recorder CR)> Pair(string tag, SessionConfig? lc = null, SessionConfig? dc = null)
+    {
+        var (s, sr, port) = await H.Listener(tag + "-l", lc);
+        var cr = new Recorder();
+        var c = new Session(new Role.Dial(["127.0.0.1"], port), dc ?? H.Cfg(tag + "-d"), cr.Add);
+        c.Start();
+        await H.Until(() => sr.Connects == 1 && cr.Connects == 1, "connected", 5);
+        return (s, sr, c, cr);
+    }
+
+    static SessionConfig Old(string tag) => new() { Token = H.Token, Name = tag, DownloadDir = H.TempDir(tag), Backoff = [0.2, 0.4], Caps = [] };
+
+    static bool FailedWith(Recorder r, string id, string text) => r.LastState(id) is { Kind: ItemStateKind.Failed } st && (st.Error ?? "").Contains(text);
+
+    public static async Task TooBigEarly()
+    {
+        var lc = new SessionConfig { Token = H.Token, Name = "big-l", DownloadDir = H.TempDir("big-l"), FreeSpaceOverride = 10_000_000_000 };
+        var (s, sr, c, cr) = await Pair("big", lc);
+        using var _ = s; using var __ = c;
+        var huge = Sparse(H.TempDir("big-src"), "huge.bin", 200_000_000_000);
+        var sw = Stopwatch.StartNew();
+        var item = c.SendFile(huge);
+        await H.Until(() => cr.LastState(item.Id)?.Kind == ItemStateKind.Failed, "refused", 5);
+        H.True(sw.Elapsed.TotalSeconds < 5, $"refused in {sw.Elapsed.TotalSeconds:0.0} s");
+        var why = cr.LastState(item.Id)!.Error ?? "";
+        H.True(why.Contains("not enough disk space") && why.Contains("200"), why);
+        await H.Until(() => sr.ReceiveFailures.Any(x => x.Contains("not enough disk space")), "receiver noted it", 5);
+        var t = c.SendText("still here");
+        await H.Until(() => cr.Delivered(t.Id), "text after refusal", 5);
+        File.Delete(huge);
+    }
+
+    public static async Task OverBound()
+    {
+        var (s, _, c, cr) = await Pair("bound");
+        using var _1 = s; using var _2 = c;
+        var huge = Sparse(H.TempDir("bound-src"), "2tb.bin", 2L << 40);
+        var item = c.SendFile(huge);
+        await H.Until(() => cr.LastState(item.Id)?.Kind == ItemStateKind.Failed, "refused", 5);
+        File.Delete(huge);
+    }
+
+    public static async Task OldPeers()
+    {
+        foreach (var (lc, dc) in new[] { (Old("old-l"), H.Cfg("new-d")), (H.Cfg("new-l"), Old("old-d")) })
+        {
+            var (s, sr, c, cr) = await Pair("compat", lc, dc);
+            using var _1 = s; using var _2 = c;
+            var src = H.RandomFile(H.TempDir("compat-src"), "c.bin", 700_000);
+            var a = c.SendFile(src); var b = s.SendFile(src);
+            await H.Until(() => cr.Delivered(a.Id) && sr.Delivered(b.Id), "delivered both ways", 10);
+            H.Eq(Hashing.Sha256File(src), Hashing.Sha256File(sr.Received.First().Path!), "same bytes");
+        }
+    }
+
+    static Dictionary<string, string> Tree(string root) =>
+        new DirectoryInfo(root).EnumerateFileSystemInfos("*", SearchOption.AllDirectories)
+            .ToDictionary(e => Path.GetRelativePath(root, e.FullName).Replace('\\', '/'), e => e is DirectoryInfo ? "dir" : Hashing.Sha256File(e.FullName));
+
+    static void Same(Dictionary<string, string> want, Dictionary<string, string> got, string what) =>
+        H.True(want.Count == got.Count && want.All(kv => got.TryGetValue(kv.Key, out var v) && v == kv.Value),
+               $"{what}: want [{string.Join(", ", want.Keys.Order())}], got [{string.Join(", ", got.Keys.Order())}]");
+
+    static string SampleFolder(string tag, string name = "Project Ünïcødé 📁")
+    {
+        var root = Path.Combine(H.TempDir(tag), name);
+        void Put(string rel, string text) { var p = Path.Combine(root, rel); Directory.CreateDirectory(Path.GetDirectoryName(p)!); File.WriteAllText(p, text); }
+        Put("readme.txt", "top"); Put("a/b/c/deep.txt", "deep"); Put("日本/ファイル.txt", "日本語");
+        Directory.CreateDirectory(Path.Combine(root, "empty", "inner-empty"));
+        H.RandomFile(Path.Combine(root, "a"), "big.bin", 3 << 20);
+        return root;
+    }
+
+    static List<Item> Folders(Recorder r) => r.Received.Where(i => i.IsFolder).ToList();
+
+    public static async Task FolderBothWays()
+    {
+        var (s, sr, c, cr) = await Pair("fold");
+        using var _1 = s; using var _2 = c;
+        var src = SampleFolder("fold-src");
+        var want = Tree(src);
+        var a = c.SendFolder(src);
+        H.Eq(4, a.Count, "count"); H.Eq((3L << 20) + 3 + 4 + 9, a.Size, "size");
+        var b = s.SendFolder(src);
+        await H.Until(() => cr.Delivered(a.Id) && sr.Delivered(b.Id), "delivered both ways", 15);
+        Same(want, Tree(Folders(sr)[0].Path!), "listener copy");
+        Same(want, Tree(Folders(cr)[0].Path!), "dialer copy");
+        H.Eq("Project Ünïcødé 📁", Folders(sr)[0].FileName, "name");
+        var again = c.SendFolder(src);
+        await H.Until(() => cr.Delivered(again.Id), "second copy", 15);
+        H.Eq("Project Ünïcødé 📁 (2)", Folders(sr)[^1].FileName, "clash name");
+        H.Eq(0, Directory.EnumerateFileSystemEntries(s.Config.DownloadDir).Count(e => Path.GetFileName(e).StartsWith('.')), "no staging left");
+    }
+
+    public static async Task LargeTree()
+    {
+        var (s, sr, c, cr) = await Pair("tree");
+        using var _1 = s; using var _2 = c;
+        var root = Path.Combine(H.TempDir("tree-src"), "many");
+        for (var i = 0; i < 300; i++) { var p = Path.Combine(root, $"d{i % 12}", $"sub{i % 5}", $"f{i}.txt"); Directory.CreateDirectory(Path.GetDirectoryName(p)!); File.WriteAllText(p, $"file {i}"); }
+        H.RandomFile(root, "large.bin", 20 << 20);
+        var item = c.SendFolder(root);
+        await H.Until(() => cr.Delivered(item.Id), "delivered", 30);
+        Same(Tree(root), Tree(Folders(sr)[0].Path!), "tree");
+        H.Eq(301, Folders(sr)[0].Count, "count");
+    }
+
+    public static async Task FolderLinks()
+    {
+        var (s, sr, c, cr) = await Pair("link");
+        using var _1 = s; using var _2 = c;
+        var secretDir = H.TempDir("link-secret");
+        File.WriteAllText(Path.Combine(secretDir, "secret.txt"), "do not send");
+        var root = Path.Combine(H.TempDir("link-src"), "withlinks");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "real.txt"), "ok");
+        var mk = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{Path.Combine(root, "up")}\" \"{secretDir}\"") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true })!;
+        await mk.WaitForExitAsync();
+        H.True(Directory.Exists(Path.Combine(root, "up")), "junction made");
+        var skipped = 1;
+        try { File.CreateSymbolicLink(Path.Combine(root, "escape.txt"), Path.Combine(secretDir, "secret.txt")); skipped++; } catch (Exception) { }   // needs Developer Mode
+        H.Eq(skipped, Session.ScanFolder(root).Skipped, "links counted");
+        var item = c.SendFolder(root);
+        await H.Until(() => cr.Delivered(item.Id), "delivered", 10);
+        Same(new() { ["real.txt"] = Hashing.Sha256File(Path.Combine(root, "real.txt")) }, Tree(Folders(sr)[0].Path!), "only the real file");
+    }
+
+    public static async Task FolderTooBig()
+    {
+        var lc = new SessionConfig { Token = H.Token, Name = "ftb-l", DownloadDir = H.TempDir("ftb-l"), FreeSpaceOverride = 2 << 20 };
+        var (s, sr, c, cr) = await Pair("ftb", lc);
+        using var _1 = s; using var _2 = c;
+        var item = c.SendFolder(SampleFolder("ftb-src"));
+        await H.Until(() => FailedWith(cr, item.Id, "not enough disk space"), "refused", 5);
+        await H.Until(() => sr.ReceiveFailures.Count > 0, "receiver noted it", 5);
+        H.Eq(0, Folders(sr).Count, "nothing saved");
+    }
+
+    public static async Task FolderOldPeer()
+    {
+        var (s, _, c, cr) = await Pair("fold-old", Old("fold-old-l"));
+        using var _1 = s; using var _2 = c;
+        var item = c.SendFolder(SampleFolder("fold-old-src"));
+        await H.Until(() => FailedWith(cr, item.Id, "Update Lan-Line"), "says update", 5);
+    }
+
+    public static async Task FolderEscape()
+    {
+        var (s, r, port) = await H.Listener("escape");
+        using var _ = s;
+        foreach (var bad in new[] { "../evil.txt", "a/../../evil.txt", "/etc/evil.txt", "a\\..\\..\\evil.txt", "", "a//b", "." })
+        {
+            using var c = await RawClient.Connect(port);
+            await c.Hello();
+            await c.Send(Frame.FolderBegin("F", "x", 1, 4));
+            await c.Send(Frame.FileBegin("f1", "evil.txt", 4, null, "F", bad));
+            await c.Send("evil"u8.ToArray());
+            await c.Send(Frame.FileEnd("f1", H.Sha("evil"u8.ToArray())));
+            await c.Send(Frame.FolderEnd("F"));
+            Frame? ack;
+            do { ack = await c.NextNonBeat(); } while (ack != null && ack.Type != "ack");
+            H.True(ack is { Ok: false }, $"path '{bad}' refused, got {ack}");
+        }
+        H.True(!File.Exists(Path.Combine(Path.GetDirectoryName(s.Config.DownloadDir)!, "evil.txt")), "nothing outside");
+        H.Eq(0, Directory.EnumerateFileSystemEntries(s.Config.DownloadDir).Count(), "nothing left inside");
+        H.Eq(0, r.Received.Count, "nothing received");
+    }
+
+    // ---------- update notices ----------
+
+    public static Task VersionOrder()
+    {
+        foreach (var good in new[] { "0.9.0-beta.6", "1.0.0", "0.10.2", "12.0.0-beta.10", "0.0.0" }) H.True(LanLineVersion.Parse(good) != null, good);
+        foreach (var bad in new[] { "v1.0.0", "1.0", "1.0.0.0", "1.0.0-rc.1", "1.0.0-beta.", "1.0.0-beta", "01.0.0", "1.0.0-beta.06", " 1.0.0",
+                                    "1.0.0 ", "1.0.0\n", "1.0.0-beta.6+x", "1234567.0.0", "１.0.0", "", "-1.0.0", "1..0", "1.0.0-BETA.1" })
+            H.True(LanLineVersion.Parse(bad) == null, $"should refuse '{bad}'");
+        var order = new[] { "0.9.0-beta.5", "0.9.0-beta.6", "0.9.0-beta.10", "0.9.0", "0.9.1-beta.1", "0.10.0", "1.0.0" }.Select(v => LanLineVersion.Parse(v)!).ToList();
+        for (var i = 0; i + 1 < order.Count; i++) H.True(order[i] < order[i + 1] && !(order[i + 1] < order[i]), $"{order[i]} < {order[i + 1]}");
+        H.Eq("0.9.0-beta.6", LanLineVersion.Parse("0.9.0-beta.6")!.ToString(), "round trip");
+        return Task.CompletedTask;
+    }
+
+    public static Task UrlAllowlist()
+    {
+        foreach (var ok in new[] { "https://averywrobinson.com/lan-line/", "https://averywrobinson.com/lan-line/#download",
+                                   "https://github.com/averywrobinson/lan-line/releases/tag/v0.9.0-beta.6", "https://github.com/averywrobinson/lan-line/releases" })
+            H.True(Updates.IsAllowedUrl(ok), ok);
+        foreach (var bad in new[] { "http://averywrobinson.com/lan-line/", "https://averywrobinson.com/lan-line", "https://averywrobinson.com/",
+                                    "https://averywrobinson.com.evil.com/lan-line/", "https://evil.com/https://averywrobinson.com/lan-line/",
+                                    "https://averywrobinson.com/lan-line/../evil", "https://averywrobinson.com/lan-line//evil.com",
+                                    "https://github.com/averywrobinson/lan-line-evil/", "https://github.com/evil/lan-line/",
+                                    "https://github.com/averywrobinson/lan-line/@evil.com", "https://github.com/averywrobinson/lan-line/x?y=1",
+                                    "https://github.com/averywrobinson/lan-line/x y", "https://github.com/averywrobinson/lan-line/\nx",
+                                    "javascript:alert(1)", "HTTPS://averywrobinson.com/lan-line/", "https://averywrobinson.com/lan-line/ä",
+                                    "https://averywrobinson.com/lan-line/" + new string('a', 300), "" })
+            H.True(!Updates.IsAllowedUrl(bad), $"should refuse '{bad}'");
+        return Task.CompletedTask;
+    }
+
+    public static Task VersionJson()
+    {
+        const string good = "{\"version\":\"0.9.1\",\"released\":\"2026-12-01\",\"url\":\"https://github.com/averywrobinson/lan-line/releases/tag/v0.9.1\",\"notes_url\":\"https://averywrobinson.com/lan-line/\"}";
+        H.Eq("0.9.1", Updates.Parse(Encoding.UTF8.GetBytes(good))?.Version.ToString(), "good file");
+        H.True(Updates.Parse(Encoding.UTF8.GetBytes(good.Replace("github.com", "evil.com"))) == null, "bad url");
+        H.True(Updates.Parse(Encoding.UTF8.GetBytes(good.Replace("0.9.1\"", "v0.9.1\""))) == null, "bad version");
+        H.True(Updates.Parse("<html>"u8.ToArray()) == null, "garbage");
+        H.True(Updates.Parse(new byte[70_000]) == null, "too big");
+        return Task.CompletedTask;
+    }
+
+    public static async Task ChecksQuiet()
+    {
+        var r = await Updates.FetchLatest("0.9.0-beta.6", "http://127.0.0.1:9/lan-line/version.json");
+        H.Eq(Updates.Outcome.Failed, r.Kind, "refused port fails");
+        H.Eq(Updates.Outcome.Failed, (await Updates.FetchLatest("not-a-version")).Kind, "bad own version fails before any network use");
+        H.True(Updates.Message(r, manual: false) == null, "automatic failure is silent");
+        H.True(Updates.Message(new Updates.CheckResult(Updates.Outcome.UpToDate, LanLineVersion.Parse("1.0.0")), manual: false) == null, "automatic up-to-date is silent");
+        H.True(Updates.Message(r, manual: true) != null, "manual failure says so");
+    }
+
+    public static Task AutoOff()
+    {
+        var now = DateTime.UtcNow;
+        H.True(!Updates.DueForAutoCheck(new StorageSettings(), now), "off unless turned on");
+        var dir = H.TempDir("upd");
+        var path = Path.Combine(dir, "settings.json");
+        File.WriteAllText(path, "{\"confirmed\":true,\"limitGB\":25,\"overLimit\":\"trash\",\"retentionDays\":30,\"trashReminder\":false}");
+        var s = StorageSettings.Load(path);
+        H.True(s.RetentionDays == 30 && s.Confirmed && !Updates.DueForAutoCheck(s, now), "beta.5 settings keep values, stay off");
+        var on = new StorageSettings { AutoUpdateCheck = true };
+        H.True(Updates.DueForAutoCheck(on, now), "on: due");
+        on.LastUpdateCheck = now.AddHours(-1);
+        H.True(!Updates.DueForAutoCheck(on, now), "once a day at most");
+        on.LastUpdateCheck = now.AddHours(-25);
+        H.True(Updates.DueForAutoCheck(on, now), "due again after a day");
+        return Task.CompletedTask;
+    }
+
+    static List<string> UpdatesOf(Recorder r) => r.All.OfType<SessionEvent.UpdateAvailable>().Select(u => $"{u.Version} {u.Url}").ToList();
+
+    static SessionConfig Ver(string tag, string v, Updates.Available? latest = null) =>
+        new() { Token = H.Token, Name = tag, DownloadDir = H.TempDir(tag), Backoff = [0.2, 0.4], AppVersion = v, LatestKnown = latest };
+
+    public static async Task PeerRelay()
+    {
+        var (s, sr, c, cr) = await Pair("rel", Ver("rel-l", "0.9.0-beta.6", new Updates.Available(LanLineVersion.Parse("0.9.1")!, "https://averywrobinson.com/lan-line/")),
+                                         Ver("rel-d", "0.9.0-beta.5"));
+        using var _1 = s; using var _2 = c;
+        await H.Until(() => UpdatesOf(cr).Contains("0.9.1 https://averywrobinson.com/lan-line/"), "dialer told", 5);
+        H.Eq(0, UpdatesOf(sr).Count, "newer side hears nothing new");
+        c.NoteLatest(new Updates.Available(LanLineVersion.Parse("0.9.2")!, "https://github.com/averywrobinson/lan-line/releases/tag/v0.9.2"));
+        await H.Until(() => UpdatesOf(sr).Contains("0.9.2 https://github.com/averywrobinson/lan-line/releases/tag/v0.9.2"), "relayed", 5);
+    }
+
+    public static async Task PeerVersionOnly()
+    {
+        var (s, _, c, cr) = await Pair("pv", Ver("pv-l", "0.9.0-beta.7"), Ver("pv-d", "0.9.0-beta.6"));
+        using var _1 = s; using var _2 = c;
+        await H.Until(() => UpdatesOf(cr).SequenceEqual(["0.9.0-beta.7 https://github.com/averywrobinson/lan-line/releases/tag/v0.9.0-beta.7"]), "told", 5);
+    }
+
+    public static async Task PeerBadLinks()
+    {
+        var (s, r, port) = await H.Listener("bad-l", Ver("bad-l", "0.9.0-beta.6"));
+        using var _ = s;
+        using var c = await RawClient.Connect(port);
+        await c.Hello();
+        foreach (var (v, u) in new[] { ("9.9.9", "https://evil.com/lan-line/"), ("9.9.9", "https://averywrobinson.com/lan-line/../../evil"),
+                                       ("v9.9.9", "https://averywrobinson.com/lan-line/"), ("9.9.9 ", "https://averywrobinson.com/lan-line/") })
+            await c.Send(Frame.VersionInfo("0.9.0-beta.5", new Frame.LatestKnownInfo(v, u)));
+        await c.Send(new Frame { Type = "version", Version = "9.9.9\nclick https://evil.com" });
+        await c.Send(Frame.TextItem("after", "done"));
+        await H.Until(() => r.Received.Count > 0, "text after", 5);
+        H.Eq(0, UpdatesOf(r).Count, "nothing shown");
     }
 }

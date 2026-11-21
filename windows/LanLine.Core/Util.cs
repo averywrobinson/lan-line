@@ -34,6 +34,16 @@ public static class Names
         return Reserved.Contains(stem) ? "_" + s : s;   // Windows device names (CON, NUL, ...)
     }
 
+    /// <summary>A peer-supplied path inside a received folder ("/"-separated) as safe components; null if it is absolute,
+    /// empty, has an empty, "." or ".." part or a backslash, or is deeper than 64.</summary>
+    public static string[]? SafePath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        var parts = path.Split('/');
+        if (parts.Length > 64 || parts.Any(p => p.Length == 0 || p == "." || p == ".." || p.Contains('\\'))) return null;
+        return [.. parts.Select(Sanitize)];
+    }
+
     /// <summary>dir\name, or dir\name (2).ext, dir\name (3).ext, ... if it already exists.</summary>
     public static string Unique(string name, string dir)
     {

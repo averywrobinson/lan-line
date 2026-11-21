@@ -31,6 +31,12 @@ public struct SessionConfig: Sendable {
     public var rekeyOnPair = false
     /// Listener: addresses to tell an authenticated dialer about (its fallbacks if one stops working).
     public var advertise: [String] = []
+    /// What this side tells its peer it can do (PROTOCOL.md "Capabilities"). Tests set [] to act like beta.5.
+    public var caps: [String] = ["sha_end", "folders"]
+    /// This app's version ("0.9.0-beta.6"), told to the other computer so either can say "an update is available".
+    public var appVersion = ""
+    /// The newest version this computer already knows of (saved by the app), passed on to the other computer.
+    public var latestKnown: Updates.Available?
 
     public init(token: String, name: String, downloadDir: URL) {
         self.token = token; self.name = name; self.downloadDir = downloadDir
@@ -40,6 +46,22 @@ public struct SessionConfig: Sendable {
 public enum ItemKind: Sendable, Equatable {
     case text(String)
     case file(name: String, size: Int64, url: URL)
+    /// A folder sent as one item: `count` files, `size` bytes in all.
+    case folder(name: String, count: Int, size: Int64, url: URL)
+}
+
+/// One entry of an outgoing folder, in send order (a folder always before what's inside it).
+public enum FolderEntry: Sendable, Equatable {
+    case dir(String)                      // "/"-separated path inside the folder
+    case file(String, URL, Int64)
+}
+
+/// What `Session.scanFolder` found: entries to send, and symlinks left out (never followed).
+public struct FolderScan: Sendable {
+    public var entries: [FolderEntry] = []
+    public var count = 0
+    public var size: Int64 = 0
+    public var skipped = 0
 }
 
 public enum ItemState: Sendable, Equatable {
@@ -79,6 +101,8 @@ public enum SessionEvent: Sendable, Equatable {
     case rekeyed(token: String)
     /// Dialer: the listener's addresses (from hello_ok); keep them as fallback hosts.
     case peerAddresses([String])
+    /// A newer Lan-Line exists (heard from the other computer, or from an update check): show a link, nothing more.
+    case updateAvailable(version: String, url: String)
 }
 
 /// The one Lan-Line session object. The window, the headless mode and the tests all drive this.
@@ -95,15 +119,19 @@ public final class Session: @unchecked Sendable {
 
     private struct Out {
         var item: Item
-        var sha: String?
+        var sha: String?               // files for a beta.5 peer: hashed before file_begin
+        var hashing = false
         var onWire = false
-        var hashFailed: String?
+        var entries: [FolderEntry] = []
     }
     private struct InFile {
         let id: String
         let name: String
         let size: Int64
-        let sha: String
+        var sha: String?                // nil = it comes in file_end
+        var folder: String?
+        var dir: URL?                   // inside a folder: where the file goes
+        var acked = false               // refused at file_begin, already answered
         var part: URL?
         var handle: FileHandle?
         var hasher = SHA256()
@@ -130,12 +158,29 @@ public final class Session: @unchecked Sendable {
 
     /// Up to `window` chunks in flight: enough to keep a LAN busy, bounded memory (window × chunkSize).
     private final class FileSend: @unchecked Sendable {   // confined to the session queue
-        let id: String, handle: FileHandle, size: Int64, link: Link
+        let id: String, itemID: String, handle: FileHandle, size: Int64, link: Link
+        var hasher: SHA256?            // set when the SHA-256 goes in file_end
+        let base: Int64, total: Int64  // progress across a folder
+        var next: (@Sendable () -> Void)?   // inside a folder: what comes after this file
         var inFlight = 0, sentBytes: Int64 = 0, eof = false, lastStep = -1
-        init(id: String, handle: FileHandle, size: Int64, link: Link) { self.id = id; self.handle = handle; self.size = size; self.link = link }
+        init(id: String, itemID: String, handle: FileHandle, size: Int64, link: Link, hasher: SHA256?, base: Int64, total: Int64) {
+            self.id = id; self.itemID = itemID; self.handle = handle; self.size = size; self.link = link
+            self.hasher = hasher; self.base = base; self.total = total
+        }
     }
     static let window = 4
     private var inFile: InFile?
+    private struct InFolder {
+        let id: String, name: String, count: Int, size: Int64
+        var stage: URL?
+        var files = 0
+        var bytes: Int64 = 0
+        var reject: String?
+        var acked = false
+    }
+    private var inFolder: InFolder?
+    private var peerCaps = Set<String>()
+    private var latestKnown: Updates.Available?
     private var done = Set<String>()    // ids already delivered to us
     private var lastHeard = Date.distantPast
     private var lastBeat = Date.distantPast
@@ -148,6 +193,7 @@ public final class Session: @unchecked Sendable {
         // A short token is a pairing code from 0.9.0-beta.1: upgrade it on the next connection too.
         self.rekeyOnPair = config.rekeyOnPair || (config.token.count < 32 && { if case .listener = role { return true }; return false }())
         self.queue = DispatchQueue(label: "lan-line.session")
+        self.latestKnown = config.latestKnown
     }
 
     // MARK: public API (any thread)
@@ -178,17 +224,57 @@ public final class Session: @unchecked Sendable {
         let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.int64Value ?? -1
         let item = Item(id: UUID().uuidString, kind: .file(name: url.lastPathComponent, size: size, url: url),
                         incoming: false, state: .waiting)
-        queue.async {
-            self.enqueue(Out(item: item))
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result: Result<String, Error> = Result { try Hashing.sha256(of: url) }
-                self.queue.async { self.hashed(item.id, result) }
-            }
-        }
+        queue.async { self.enqueue(Out(item: item)) }   // hashed while it streams (or first, for a beta.5 peer)
         return item
     }
 
+    /// Send a whole folder as one item. Symlinks are left out (see `scanFolder`).
+    @discardableResult
+    public func send(folder url: URL) -> Item {
+        let scan = Session.scanFolder(url)
+        let item = Item(id: UUID().uuidString, kind: .folder(name: url.lastPathComponent, count: scan.count, size: scan.size, url: url),
+                        incoming: false, state: .waiting)
+        queue.async { self.enqueue(Out(item: item, sha: "", entries: scan.entries)) }
+        return item
+    }
+
+    /// Walk a folder: every subfolder and regular file, parents first. Symlinks are never followed or sent
+    /// (one could point outside the folder); they're counted in `skipped`.
+    public static func scanFolder(_ root: URL) -> FolderScan {
+        var scan = FolderScan()
+        let base = root.standardizedFileURL.pathComponents.count
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey, .fileSizeKey]
+        guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys) else { return scan }
+        for case let u as URL in e {
+            guard let v = try? u.resourceValues(forKeys: Set(keys)) else { continue }
+            let rel = u.standardizedFileURL.pathComponents.dropFirst(base).joined(separator: "/")
+            if v.isSymbolicLink == true { scan.skipped += 1; continue }
+            if v.isDirectory == true { scan.entries.append(.dir(rel)) }
+            else if v.isRegularFile == true {
+                let n = Int64(v.fileSize ?? 0)
+                scan.entries.append(.file(rel, u, n)); scan.count += 1; scan.size += n
+            }
+        }
+        return scan
+    }
+
     public var isConnected: Bool { queue.sync { linkUp } }
+
+    /// An update check found this: remember it, show it if it's newer, and tell the other computer.
+    public func noteLatest(_ a: Updates.Available) { queue.async { self.consider(a) } }
+
+    private func versionFrame() -> Frame {
+        Frame.versionInfo(config.appVersion, latest: latestKnown.map { .init(version: $0.version.description, url: $0.url) })
+    }
+
+    /// Keep the newest version above our own; if it changed, say so and pass it on.
+    private func consider(_ a: Updates.Available) {
+        guard let own = LanLineVersion(config.appVersion), a.version > own, Updates.isAllowedURL(a.url) else { return }
+        if let k = latestKnown, k.version >= a.version { return }
+        latestKnown = a
+        emit(.updateAvailable(version: a.version.description, url: a.url))
+        if linkUp, let l = link { l.send(text: versionFrame().json) }
+    }
 
     /// Liveness check; the internal timer calls it every `tickInterval`. Tests call it after moving the clock.
     public func tick() { queue.async { self.tickOnQueue() } }
@@ -281,7 +367,9 @@ public final class Session: @unchecked Sendable {
             if l === dialing {
                 let hs = DialerHandshake(secret: token, name: config.name)
                 dialHS = hs
-                l.send(text: hs.hello.json)
+                var hello = hs.hello
+                hello.caps = config.caps   // outside the MAC: stripping it only falls back to beta.5 behaviour
+                l.send(text: hello.json)
             }
         case .closed(let reason):
             pending[ObjectIdentifier(l)] = nil
@@ -336,7 +424,10 @@ public final class Session: @unchecked Sendable {
         } else if ans.secretIndex == 1 {   // the dialer still has the pairing code: it missed the swap, send it again
             rekey = token
         }
-        l.send(text: ans.ok.json)
+        var ok = ans.ok
+        ok.caps = config.caps
+        peerCaps = Set(f.caps ?? [])
+        l.send(text: ok.json)
         l.channel = ans.channel            // everything after hello_ok is sealed
         if let rekey { l.send(text: Frame.rekey(rekey).json) }
         if !config.advertise.isEmpty { l.send(text: Frame.addresses(config.advertise).json) }
@@ -361,6 +452,7 @@ public final class Session: @unchecked Sendable {
             return
         }
         l.channel = ch
+        peerCaps = Set(f.caps ?? [])
         dialHS = nil
         dialing = nil
         attempt = 0
@@ -379,6 +471,7 @@ public final class Session: @unchecked Sendable {
         lastHeard = now()
         lastBeat = now()
         emit(.connected(peer: peer))
+        if !config.appVersion.isEmpty { l.send(text: versionFrame().json) }   // beta.5 ignores it
         pump()
     }
 
@@ -393,6 +486,7 @@ public final class Session: @unchecked Sendable {
             if let p = f.part { try? FileManager.default.removeItem(at: p) }
             inFile = nil
         }
+        dropFolder()
         for i in out.indices where out[i].onWire {
             out[i].onWire = false
             out[i].item.state = .waiting
@@ -433,11 +527,31 @@ public final class Session: @unchecked Sendable {
         case "file_begin":
             guard let id = f.id else { return }
             abortIncoming()
-            beginFile(id: id, name: f.name ?? "file", size: f.size ?? -1, sha: (f.sha256 ?? "").lowercased())
+            if f.folder == nil { dropFolder() }
+            beginFile(id: id, name: f.name ?? "file", size: f.size ?? -1, sha: f.sha256?.lowercased(), folder: f.folder, path: f.path, on: l)
         case "file_end":
             guard let id = f.id, let file = inFile, file.id == id else { return }
             inFile = nil
-            finishFile(file, on: l)
+            finishFile(file, endSha: f.sha256?.lowercased(), on: l)
+        case "folder_begin":
+            guard let id = f.id else { return }
+            abortIncoming(); dropFolder()
+            beginFolder(id: id, name: f.name ?? "folder", count: f.count ?? -1, size: f.size ?? -1, on: l)
+        case "mkdir":
+            guard var d = inFolder, d.id == f.folder, d.reject == nil, let stage = d.stage else { return }
+            if let comps = Names.safePath(f.path ?? "") {
+                var url = stage
+                for c in comps { url.appendPathComponent(c) }
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue { d.reject = "bad folder entry" }
+                else if (try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)) == nil { d.reject = "cannot write" }
+            } else { d.reject = "bad path in folder" }
+            inFolder = d
+        case "folder_end":
+            guard let id = f.id, let d = inFolder, d.id == id else { return }
+            abortIncoming()
+            inFolder = nil
+            finishFolder(d, on: l)
         case "rekey":   // listener → dialer only, inside the encrypted channel
             guard case .dialer = role, let r = f.token, r.count == 64, r.allSatisfy(\.isHexDigit) else { return }
             if r != token { token = r; emit(.rekeyed(token: r)) }
@@ -445,11 +559,20 @@ public final class Session: @unchecked Sendable {
             guard case .dialer = role else { return }
             let addrs = (f.addrs ?? []).filter(Self.isIPv4).prefix(8)
             if !addrs.isEmpty { emit(.peerAddresses(Array(addrs))) }
+        case "version":   // the peer's version and the newest it knows of; strict parse, allowlisted links only
+            if let v = f.version.flatMap(LanLineVersion.init) { consider(.init(version: v, url: Updates.releasePage(v))) }
+            if let k = f.latestKnown, let v = LanLineVersion(k.version), Updates.isAllowedURL(k.url) { consider(.init(version: v, url: k.url)) }
         case "ack":
             guard let id = f.id, let i = out.firstIndex(where: { $0.item.id == id }) else { return }
             var o = out.remove(at: i)
             o.item.state = (f.ok ?? false) ? .delivered : .failed(f.err ?? "rejected")
             emit(.outgoing(o.item))
+            if let fs = fileSend, fs.itemID == id {   // refused while streaming (too big): stop now
+                fileSend = nil
+                try? fs.handle.close()
+                busy = false
+                pump()
+            }
         default:
             break   // beat, or a newer frame type: liveness already noted
         }
@@ -462,19 +585,45 @@ public final class Session: @unchecked Sendable {
         return v?.volumeAvailableCapacityForImportantUsage ?? v?.volumeAvailableCapacity.map(Int64.init)
     }
 
-    private func beginFile(id: String, name raw: String, size: Int64, sha: String) {
+    private func noSpace(_ size: Int64) -> String? {
+        guard let free = freeSpace(), size + config.diskReserve > free else { return nil }
+        let fmt = { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+        return "not enough disk space on \(config.name) (needs \(fmt(size)), \(fmt(max(free - config.diskReserve, 0))) free)"
+    }
+
+    /// A refusal the receiver can give at once, before any bytes: the sender stops and both windows say why.
+    private func refuseNow(id: String, name: String, reason: String, on l: Link) {
+        l.send(text: Frame.ack(id: id, ok: false, err: reason).json)
+        emit(.receiveFailed(name: name, reason: reason))
+    }
+
+    private func beginFile(id: String, name raw: String, size: Int64, sha: String?, folder: String?, path: String?, on l: Link) {
         let name = Names.sanitize(raw)
-        var f = InFile(id: id, name: name, size: size, sha: sha)
-        if size < 0 || size > config.maxFileSize {
+        var f = InFile(id: id, name: name, size: size, sha: sha, folder: folder)
+        if let folder {   // a file inside the folder being received
+            guard var d = inFolder, d.id == folder, d.reject == nil, let stage = d.stage else {
+                f.reject = "not in a folder"; inFile = f; return
+            }
+            d.bytes += max(size, 0)
+            if size < 0 || d.bytes > d.size { d.reject = "folder bigger than announced" }
+            else if let comps = Names.safePath(path ?? "") {
+                var dir = stage
+                for c in comps.dropLast() { dir.appendPathComponent(c) }
+                f = InFile(id: id, name: comps.last!, size: size, sha: sha, folder: folder, dir: dir)
+            } else { d.reject = "bad path in folder" }
+            inFolder = d
+            if let r = d.reject { f.reject = r; inFile = f; return }
+        } else if size < 0 || size > config.maxFileSize {
             f.reject = "too big or bad size"
-        } else if let free = freeSpace(), size + config.diskReserve > free {
-            f.reject = "not enough disk space (\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free)"
-        } else if sha.count != 64 || !sha.allSatisfy(\.isHexDigit) {
-            f.reject = "bad sha256"
-        } else {
+        } else if let r = noSpace(size) {
+            f.reject = r
+        }
+        if f.reject == nil, let sha, sha.count != 64 || !sha.allSatisfy(\.isHexDigit) { f.reject = "bad sha256" }
+        if f.reject == nil {
             do {
-                try FileManager.default.createDirectory(at: config.downloadDir, withIntermediateDirectories: true)
-                let part = config.downloadDir.appendingPathComponent(".\(name).\(UUID().uuidString.prefix(8)).part")
+                let dir = f.dir ?? config.downloadDir
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let part = dir.appendingPathComponent(".\(f.name).\(UUID().uuidString.prefix(8)).part")
                 FileManager.default.createFile(atPath: part.path, contents: nil)
                 f.handle = try FileHandle(forWritingTo: part)
                 f.part = part
@@ -482,7 +631,56 @@ public final class Session: @unchecked Sendable {
                 f.reject = "cannot write: \(error.localizedDescription)"
             }
         }
+        if let r = f.reject, folder == nil {   // answer now: the sender stops instead of streaming it all
+            refuseNow(id: id, name: name, reason: r, on: l)
+            f.acked = true
+        }
         inFile = f
+    }
+
+    private func beginFolder(id: String, name raw: String, count: Int, size: Int64, on l: Link) {
+        let name = Names.sanitize(raw)
+        var d = InFolder(id: id, name: name, count: count, size: size)
+        if count < 0 || count > 1_000_000 || size < 0 || size > config.maxFileSize { d.reject = "too big or bad size" }
+        else if let r = noSpace(size) { d.reject = r }
+        else {
+            let stage = config.downloadDir.appendingPathComponent(".\(name).\(UUID().uuidString.prefix(8)).part")
+            if (try? FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)) != nil { d.stage = stage }
+            else { d.reject = "cannot write" }
+        }
+        if let r = d.reject { refuseNow(id: id, name: name, reason: r, on: l); d.acked = true }
+        inFolder = d
+    }
+
+    private func dropFolder() {
+        if let st = inFolder?.stage { try? FileManager.default.removeItem(at: st) }
+        inFolder = nil
+    }
+
+    private func finishFolder(_ folder: InFolder, on l: Link) {
+        var d = folder
+        if d.reject == nil, d.files != d.count { d.reject = "folder incomplete" }
+        if let r = d.reject {
+            if let st = d.stage { try? FileManager.default.removeItem(at: st) }
+            if !d.acked { refuseNow(id: d.id, name: d.name, reason: r, on: l) }
+            return
+        }
+        guard let stage = d.stage else { return }
+        if done.contains(d.id) {
+            try? FileManager.default.removeItem(at: stage)
+            l.send(text: Frame.ack(id: d.id, ok: true).json)
+            return
+        }
+        let dest = Names.unique(d.name, in: config.downloadDir)
+        do { try FileManager.default.moveItem(at: stage, to: dest) } catch {
+            try? FileManager.default.removeItem(at: stage)
+            refuseNow(id: d.id, name: d.name, reason: "save failed", on: l)
+            return
+        }
+        done.insert(d.id)
+        l.send(text: Frame.ack(id: d.id, ok: true).json)
+        emit(.received(Item(id: d.id, kind: .folder(name: dest.lastPathComponent, count: d.count, size: d.size, url: dest),
+                            incoming: true, state: .received)))
     }
 
     private func handleChunk(_ d: Data) {
@@ -512,20 +710,34 @@ public final class Session: @unchecked Sendable {
         inFile = nil
     }
 
-    private func finishFile(_ file: InFile, on l: Link) {
+    private func finishFile(_ file: InFile, endSha: String?, on l: Link) {
         var f = file
         var reason = f.reject
         if reason == nil, f.received != f.size { reason = "size mismatch" }
         let digest = Data(f.hasher.finalize()).hex
-        if reason == nil, digest != f.sha { reason = "sha256 mismatch" }
+        if reason == nil, digest != (f.sha ?? endSha) { reason = "sha256 mismatch" }
         try? f.handle?.close(); f.handle = nil
         if let reason {
             dropPart(&f)
-            l.send(text: Frame.ack(id: f.id, ok: false, err: reason).json)
-            emit(.receiveFailed(name: f.name, reason: reason))
+            if f.folder != nil {   // the whole folder fails; folder_end answers
+                if inFolder?.id == f.folder, inFolder?.reject == nil { inFolder?.reject = "\(f.name): \(reason)" }
+                return
+            }
+            if !f.acked {
+                l.send(text: Frame.ack(id: f.id, ok: false, err: reason).json)
+                emit(.receiveFailed(name: f.name, reason: reason))
+            }
             return
         }
         guard let part = f.part else { return }
+        if let dir = f.dir {       // inside a folder: put it in place, count it
+            let dest = Names.unique(f.name, in: dir)
+            if (try? FileManager.default.moveItem(at: part, to: dest)) == nil {
+                try? FileManager.default.removeItem(at: part)
+                inFolder?.reject = "save failed"
+            } else { inFolder?.files += 1 }
+            return
+        }
         if done.contains(f.id) {   // a resend of something we already saved
             try? FileManager.default.removeItem(at: part)
             l.send(text: Frame.ack(id: f.id, ok: true).json)
@@ -556,6 +768,7 @@ public final class Session: @unchecked Sendable {
 
     private func hashed(_ id: String, _ result: Result<String, Error>) {
         guard let i = out.firstIndex(where: { $0.item.id == id }) else { return }
+        out[i].hashing = false
         switch result {
         case .success(let sha): out[i].sha = sha
         case .failure(let e):
@@ -566,13 +779,37 @@ public final class Session: @unchecked Sendable {
         pump()
     }
 
+    private func fail(_ id: String, _ reason: String) {
+        if let i = out.firstIndex(where: { $0.item.id == id }) {
+            var o = out.remove(at: i)
+            o.item.state = .failed(reason)
+            emit(.outgoing(o.item))
+        }
+        busy = false
+        pump()
+    }
+
+    private func fileSize(_ url: URL) -> Int64 {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.int64Value ?? 0
+    }
+
     /// Put the next queued item on the wire. One item at a time, in order.
     private func pump() {
         guard linkUp, !busy, let l = link, let i = out.firstIndex(where: { !$0.onWire }) else { return }
-        guard let sha = out[i].sha else { return }   // first in line is still being hashed
+        let item = out[i].item
+        let shaEnd = peerCaps.contains("sha_end")
+        if case .file(_, _, let url) = item.kind, !shaEnd, out[i].sha == nil {   // a beta.5 peer wants the hash first
+            if !out[i].hashing {
+                out[i].hashing = true
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let result: Result<String, Error> = Result { try Hashing.sha256(of: url) }
+                    self.queue.async { self.hashed(item.id, result) }
+                }
+            }
+            return
+        }
         out[i].onWire = true
         busy = true
-        let item = out[i].item
         switch item.kind {
         case .text(let text):
             l.send(text: Frame.text(id: item.id, text: text).json) { [weak self] ok in
@@ -581,24 +818,56 @@ public final class Session: @unchecked Sendable {
         case .file(let name, _, let url):
             do {
                 let h = try FileHandle(forReadingFrom: url)
-                let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.int64Value ?? 0
-                l.send(text: Frame.fileBegin(id: item.id, name: name, size: size, sha256: sha).json)
-                let fs = FileSend(id: item.id, handle: h, size: size, link: l)
+                let size = fileSize(url)
+                l.send(text: Frame.fileBegin(id: item.id, name: name, size: size, sha256: shaEnd ? nil : out[i].sha).json)
+                let fs = FileSend(id: item.id, itemID: item.id, handle: h, size: size, link: l, hasher: shaEnd ? SHA256() : nil, base: 0, total: size)
                 fileSend = fs
                 fillWindow(fs)
             } catch {
-                out.remove(at: i)
-                busy = false
-                var failed = item
-                failed.state = .failed("cannot read: \(error.localizedDescription)")
-                emit(.outgoing(failed))
-                pump()
+                fail(item.id, "cannot read: \(error.localizedDescription)")
             }
+        case .folder(let name, let count, let size, _):
+            guard peerCaps.contains("folders") else {
+                fail(item.id, "Update Lan-Line on \(peerName) to send folders")
+                return
+            }
+            l.send(text: Frame.folderBegin(id: item.id, name: name, count: count, size: size).json)
+            folderStep(item.id, out[i].entries, 0, base: 0, total: size, on: l)
         }
+    }
+
+    /// Send a folder's entries from `start` on: folders as mkdir, then the next file; its end continues here.
+    private func folderStep(_ itemID: String, _ entries: [FolderEntry], _ start: Int, base: Int64, total: Int64, on l: Link) {
+        guard l === link, linkUp else { return }                                         // resent after reconnect
+        guard out.contains(where: { $0.item.id == itemID }) else { busy = false; pump(); return }   // refused
+        var idx = start
+        while idx < entries.count, case .dir(let p) = entries[idx] {
+            l.send(text: Frame.mkdir(folder: itemID, path: p).json)
+            idx += 1
+        }
+        guard idx < entries.count, case .file(let p, let url, _) = entries[idx] else {
+            l.send(text: Frame.folderEnd(id: itemID).json) { [weak self] ok in self?.wrote(itemID, on: l, ok: ok) }
+            return
+        }
+        guard let h = try? FileHandle(forReadingFrom: url) else {
+            l.send(text: Frame.folderEnd(id: itemID).json)   // the receiver throws the partial folder away
+            fail(itemID, "cannot read \(p)")
+            return
+        }
+        let size = fileSize(url), sub = UUID().uuidString
+        l.send(text: Frame.fileBegin(id: sub, name: url.lastPathComponent, size: size, sha256: nil, folder: itemID, path: p).json)
+        let fs = FileSend(id: sub, itemID: itemID, handle: h, size: size, link: l, hasher: SHA256(), base: base, total: total)
+        let nextIdx = idx + 1
+        fs.next = { [weak self] in self?.folderStep(itemID, entries, nextIdx, base: base + size, total: total, on: l) }
+        fileSend = fs
+        fillWindow(fs)
     }
 
     private func fillWindow(_ fs: FileSend) {
         guard fileSend === fs, fs.link === link, linkUp else { return }   // link went down; resent later
+        guard out.contains(where: { $0.item.id == fs.itemID }) else {    // refused meanwhile
+            fileSend = nil; try? fs.handle.close(); busy = false; pump(); return
+        }
         while fs.inFlight < Session.window, !fs.eof {
             let chunk: Data
             do { chunk = try fs.handle.read(upToCount: config.chunkSize) ?? Data() } catch {
@@ -608,16 +877,18 @@ public final class Session: @unchecked Sendable {
                 return
             }
             if chunk.isEmpty { fs.eof = true; break }
+            fs.hasher?.update(data: chunk)
             fs.inFlight += 1
             fs.link.send(data: chunk) { [weak self] ok in
                 guard let self else { return }
                 fs.inFlight -= 1
                 guard ok, self.fileSend === fs else { return }
                 fs.sentBytes += Int64(chunk.count)
-                let step = fs.size > 0 ? Int(fs.sentBytes * 20 / fs.size) : 20     // progress events in 5 % steps
-                if step != fs.lastStep, let i = self.out.firstIndex(where: { $0.item.id == fs.id }) {
+                let done = fs.base + fs.sentBytes
+                let step = fs.total > 0 ? Int(done * 20 / fs.total) : 20     // progress events in 5 % steps
+                if step != fs.lastStep, let i = self.out.firstIndex(where: { $0.item.id == fs.itemID }) {
                     fs.lastStep = step
-                    self.out[i].item.state = .sending(Double(fs.sentBytes) / Double(max(fs.size, 1)))
+                    self.out[i].item.state = .sending(Double(done) / Double(max(fs.total, 1)))
                     self.emit(.outgoing(self.out[i].item))
                 }
                 self.fillWindow(fs)
@@ -626,8 +897,12 @@ public final class Session: @unchecked Sendable {
         if fs.eof, fs.inFlight == 0 {
             fileSend = nil
             try? fs.handle.close()
-            let id = fs.id, l = fs.link
-            l.send(text: Frame.fileEnd(id: id).json) { [weak self] ok in self?.wrote(id, on: l, ok: ok) }
+            let id = fs.id, itemID = fs.itemID, l = fs.link, next = fs.next
+            let sha = fs.hasher.map { Data($0.finalize()).hex }
+            l.send(text: Frame.fileEnd(id: id, sha256: sha).json) { [weak self] ok in
+                guard let self else { return }
+                if let next { if ok, l === self.link { next() } } else { self.wrote(itemID, on: l, ok: ok) }
+            }
         }
     }
 

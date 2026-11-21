@@ -79,10 +79,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             },
             cancel: { [weak self] in self?.model.showingSettings = false; self?.restoreAfterSettings() })
         runCleanup(manual: false)
-        let t = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.runCleanup(manual: false) } }
+        if let a = savedLatest() { model.showUpdate(version: a.version.description, url: a.url) }
+        checkForUpdates(manual: false)
+        let t = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.runCleanup(manual: false); self?.checkForUpdates(manual: false) }
+        }
         RunLoop.main.add(t, forMode: .common)
         cleanupTimer = t
         if !model.storage.confirmed { showSettings(firstRun: true) }   // every launch until saved once
+    }
+
+    // MARK: updates (the only network call; manual, or daily if the user turned it on)
+
+    /// The saved "newest version heard of", if it is still newer than this app.
+    private func savedLatest() -> Updates.Available? {
+        guard let s = model.storage.latestVersion, let v = LanLineVersion(s), let u = model.storage.latestURL, Updates.isAllowedURL(u),
+              let own = LanLineVersion(options.value("--app-version") ?? AppInfo.version), v > own else { return nil }
+        return Updates.Available(version: v, url: u)
+    }
+
+    @objc func checkFromMenu() { checkForUpdates(manual: true) }
+
+    private func checkForUpdates(manual: Bool) {
+        guard manual || Updates.dueForAutoCheck(model.storage, now: Date()) else { return }
+        let current = options.value("--app-version") ?? AppInfo.version
+        guard LanLineVersion(current) != nil else { if manual { model.note("This build has no version number to compare.", fadeAfter: 6) }; return }
+        var s = model.storage; s.lastUpdateCheck = Date(); model.storage = s; try? s.save(to: settingsURL)
+        Task { @MainActor [weak self] in
+            let r = await Updates.fetchLatest(current: current)
+            guard let self else { return }
+            if case .available(let a) = r {
+                if let session = self.model.session { session.noteLatest(a) } else { self.model.showUpdate(version: a.version.description, url: a.url) }
+                if manual { self.model.showUpdate(version: a.version.description, url: a.url) }
+            } else if let m = Updates.message(r, manual: manual) {
+                self.model.note(m, fadeAfter: 6)
+            }
+        }
     }
 
     private func showSettings(firstRun: Bool = false) {
@@ -97,6 +129,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var n = s
         n.lastTrashReminder = model.storage.lastTrashReminder
         n.lastLimitWarning = model.storage.lastLimitWarning
+        n.lastUpdateCheck = model.storage.lastUpdateCheck
+        n.latestVersion = model.storage.latestVersion; n.latestURL = model.storage.latestURL
         model.storage = n
         do { try n.save(to: settingsURL) } catch { model.note("Couldn't save settings: \(error.localizedDescription)") }
         model.showingSettings = false
@@ -220,6 +254,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var sc = SessionConfig(token: cfg.token, name: options.name,
                                downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir)
         sc.rekeyOnPair = pairing && !cfg.connects
+        sc.appVersion = options.value("--app-version") ?? AppInfo.version
+        sc.latestKnown = savedLatest()
         if !cfg.connects && options.value("--connect") == nil { sc.advertise = Discovery.localAddresses() }
         // The one main-thread hop: the Session calls this on its own queue.
         let s = Session(role: options.role(cfg), config: sc) { [weak self] event in
@@ -232,10 +268,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var debugPasteDone = false
 
     private func event(_ e: SessionEvent) {
-        if case .received(let item) = e, case .file(_, let size, let url) = item.kind { logReceived(url, size: size) }
+        if case .received(let item) = e {   // a received folder is kept (and cleaned up) as one entry
+            switch item.kind {
+            case .file(_, let size, let url), .folder(_, _, let size, let url): logReceived(url, size: size)
+            case .text: break
+            }
+        }
         if case .rekeyed(let t) = e {   // the pairing code was swapped for a long-term secret
             if var p = pending { p.token = t; pending = p }
             else if var c = config { c.token = t; save(c); config = c }
+        }
+        if case .updateAvailable(let v, let u) = e, model.storage.latestVersion != v {   // remember it across launches
+            var s = model.storage; s.latestVersion = v; s.latestURL = u; model.storage = s
+            try? s.save(to: settingsURL)
         }
         if case .peerAddresses(let a) = e {   // the partner's other addresses become fallback hosts
             func merged(_ h: [String]?) -> [String] { var out: [String] = []; for x in (h ?? []) + a where !out.contains(x) { out.append(x) }; return Array(out.prefix(6)) }
@@ -415,7 +460,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         p.setFrameAutosaveName("LanLinePanel")
         if options.value("--snapshot") == nil {
             p.makeKeyAndOrderFront(nil)
-            NSApp.activate()
+            NSApp.activate(ignoringOtherApps: true)
         } else {
             p.orderFrontRegardless()
         }
@@ -437,7 +482,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func showPanel(activate: Bool) {
         popUp()
-        if activate { NSApp.activate(); panel.makeKeyAndOrderFront(nil) }
+        if activate { NSApp.activate(ignoringOtherApps: true); panel.makeKeyAndOrderFront(nil) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -450,6 +495,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Lan-Line", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkFromMenu), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(settingsFromMenu), keyEquivalent: ",")
         appMenu.addItem(withTitle: "Pair with Another Computer…", action: #selector(pairFromMenu), keyEquivalent: "")

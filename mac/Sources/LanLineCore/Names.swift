@@ -33,4 +33,13 @@ public enum Names {
         } while fm.fileExists(atPath: url.path)
         return url
     }
+
+    /// A peer-supplied path inside a received folder ("/"-separated), as safe components; nil if it is absolute,
+    /// empty, has an empty, "." or ".." part or a backslash, or is deeper than 64.
+    public static func safePath(_ path: String) -> [String]? {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard !path.isEmpty, parts.count <= 64,
+              parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") }) else { return nil }
+        return parts.map(sanitize)
+    }
 }

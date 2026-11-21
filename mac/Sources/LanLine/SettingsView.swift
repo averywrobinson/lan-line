@@ -4,7 +4,7 @@ import LanLineCore
 /// Storage settings: how long received files are kept, how much room they may use, and the Trash reminder.
 /// Shown first on every launch until the user presses Save once.
 struct SettingsView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     @State private var draft = StorageSettings()
     @State private var retentionTag = 0          // a choice in days, or -1 = custom
@@ -66,6 +66,14 @@ struct SettingsView: View {
                 UsageBar(used: model.usageBytes, limit: currentLimitBytes)
 
                 Text("Only files Lan-Line received are ever moved, and only to the Trash, so you can still get them back.")
+                    .font(.system(size: 11)).foregroundStyle(p.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle(isOn: Binding(get: { draft.autoUpdateCheck ?? false }, set: { draft.autoUpdateCheck = $0 })) {
+                    Text("Check for updates automatically once a day").font(.system(size: 12)).foregroundStyle(p.text)
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                Text("Off unless you turn it on. Lan-Line then reads one small file from averywrobinson.com once a day. It sends no ID and nothing about your files.")
                     .font(.system(size: 11)).foregroundStyle(p.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 

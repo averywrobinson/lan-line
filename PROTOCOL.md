@@ -1,4 +1,4 @@
-# Lan-Line wire protocol, v2 (0.9.0-beta.5)
+# Lan-Line wire protocol, v2 (0.9.0-beta.5, capabilities from beta.6)
 
 Transport: one WebSocket per paired computers. The computer that showed the pairing code listens on `ws://0.0.0.0:47830/lan-line`; the other dials it at the addresses saved when they paired. The path is informational: the listener accepts any path. Plain RFC 6455 WebSockets with no extensions or subprotocols; the Mac app implements the framing itself on BSD sockets (`mac/Sources/LanLineCore/WebSocket.swift`), the Windows app uses .NET's `System.Net.WebSockets`.
 
@@ -14,9 +14,12 @@ Control messages are UTF-8 JSON objects with a `type` field. File bytes travel a
 | `rekey` | `token` | listener → dialer (encrypted) | Right after pairing, or when the dialer still used the pairing code: the 64-hex long-term secret. |
 | `addrs` | `addrs` | listener → dialer (encrypted) | The listener's IPv4 addresses; the dialer keeps them as fallback hosts. |
 | `text` | `id`, `text` | either | A text item. |
-| `file_begin` | `id`, `name`, `size`, `sha256` (hex) | either | A file follows. `size` ≤ 1 TiB (a sanity bound); the receiver refuses a file that would leave under 64 MiB free. |
-| (binary) | raw bytes | either | The next chunk of the current file. |
-| `file_end` | `id` | either | The current file is complete. |
+| `file_begin` | `id`, `name`, `size`, `sha256` (hex; omitted when the peer has `sha_end`), `folder`?, `path`? | either | A file follows. `size` ≤ 1 TiB (a sanity bound); the receiver refuses a file that would leave under 64 MiB free, and answers that refusal (`ack ok:false`) at once, so the sender stops. |
+| (chunk) | raw bytes | either | The next chunk of the current file. |
+| `file_end` | `id`, `sha256`? | either | The current file is complete. With `sha_end`, the SHA-256 comes here: the sender hashes while it streams. |
+| `folder_begin` | `id`, `name`, `count`, `size` | either | A folder follows (`folders` cap): `count` files, `size` bytes in all. Space is checked here, and a refusal is answered at once. |
+| `mkdir` | `folder`, `path` | either | A folder inside it (so empty folders arrive too). |
+| `folder_end` | `id` | either | The folder is complete; the receiver acks the folder's `id` once. |
 | `ack` | `id`, `ok`, `err?` | either | Receipt of an item. `ok:false` means it was rejected (`err` says why). |
 | `beat` | | either | Liveness, every 15 s. |
 
@@ -27,6 +30,12 @@ Control messages are UTF-8 JSON objects with a `type` field. File bytes travel a
 - Receivers stream to `<name>.<id>.part`, hash incrementally, and check the byte count and SHA-256 at `file_end`. On a mismatch the part file is deleted and `ack{ok:false, err:"sha256 mismatch"}` (or `"size mismatch"`) is sent. Partial files are deleted when the link drops.
 - Any frame counts as proof of life. A side that hears nothing for 45 s closes the link. WebSocket protocol pings are answered automatically too.
 - Items sent while disconnected stay queued and go out after the next `hello_ok`. An item counts as delivered only when its `ack` arrives; un-acked items are resent after a reconnect.
+
+## Capabilities (beta.6+)
+`hello` and `hello_ok` carry `caps`, what that side can do. A side without `caps` is beta.5 and gets the beta.5 behaviour (hash first, SHA-256 in `file_begin`, no folders).
+- `sha_end`: the SHA-256 may come in `file_end`, so `file_begin` goes out without hashing first. A file too big for the receiver is refused in milliseconds instead of after hashing it.
+- `folders`: `folder_begin` / `mkdir` / `file_begin` with `folder` and `path` / `folder_end`. Paths are `/`-separated and relative. The receiver refuses the whole folder on an absolute path, an empty, `.` or `..` part, a backslash, or more than 64 levels, and sanitises each name like a file name. It builds the folder in a hidden `.<name>.<random>.part` folder and moves it into place (`name (2)` on a clash) only when every file arrived and checked out. Senders never follow symlinks or junctions; they are left out.
+- `caps` sits outside the handshake MAC: removing it only falls back to beta.5 behaviour, and adding one a side can't handle breaks the link, which an attacker on the LAN can do anyway.
 
 ## Pairing and discovery
 

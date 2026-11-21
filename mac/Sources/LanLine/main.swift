@@ -28,6 +28,26 @@ if let code = options.value("--respond") {
     withExtendedLifetime(r) { dispatchMain() }
 }
 
+// --check-updates [URL]: run the update check once (default: the real version.json), print the outcome, exit.
+if options.flag("--check-updates") {
+    let arg = CommandLine.arguments.drop { $0 != "--check-updates" }.dropFirst().first
+    let url = arg.flatMap { $0.hasPrefix("http") ? URL(string: $0) : nil } ?? Updates.versionURL
+    let current = options.value("--app-version") ?? AppInfo.version
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        let r = await Updates.fetchLatest(current: current, from: url)
+        let line: String
+        switch r {
+        case .available(let a): line = "available \(a.version) \(a.url)"
+        case .upToDate(let v): line = "up-to-date \(v)"
+        case .failed: line = "failed"
+        }
+        print(line)
+        done.signal()
+    }
+    done.wait()
+    exit(0)
+}
 if options.flag("--headless") || options.flag("--selftest") {
     Headless.run(options)   // never returns
 }

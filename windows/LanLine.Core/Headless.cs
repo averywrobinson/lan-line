@@ -11,13 +11,34 @@ namespace LanLine.Core;
 /// </summary>
 public static class Headless
 {
-    public static bool Wants(string[] args) => args.Contains("--headless") || args.Contains("--selftest") || args.Contains("--discover") || args.Contains("--respond");
+    public static bool Wants(string[] args) => args.Contains("--headless") || args.Contains("--selftest") || args.Contains("--discover") || args.Contains("--respond") || args.Contains("--check-updates");
+
+    /// <summary>relative path ("/"-separated) → SHA-256 hex, or "dir".</summary>
+    static Dictionary<string, string> Manifest(string root)
+    {
+        var m = new Dictionary<string, string>();
+        foreach (var e in new DirectoryInfo(root).EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+            m[Path.GetRelativePath(root, e.FullName).Replace('\\', '/')] = e is DirectoryInfo ? "dir" : Hashing.Sha256File(e.FullName);
+        return m;
+    }
 
     static string? Val(string[] a, string f) { var i = Array.IndexOf(a, f); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }
 
     public static int Run(string[] args)
     {
         if (args.Contains("--discover") || args.Contains("--respond")) return Discover(args);
+        if (args.Contains("--check-updates"))   // run the update check once, print the outcome
+        {
+            var u = Val(args, "--check-updates") is { } x && x.StartsWith("http") ? x : Updates.VersionUrl;
+            var r = Updates.FetchLatest(Val(args, "--app-version") ?? AppInfo.Version, u).GetAwaiter().GetResult();
+            Console.WriteLine(r.Kind switch
+            {
+                Updates.Outcome.Available => $"available {r.Found!.Version} {r.Found.Url}",
+                Updates.Outcome.UpToDate => $"up-to-date {r.Version}",
+                _ => "failed",
+            });
+            return 0;
+        }
         LanLineConfig cfg;
         try { cfg = LanLineConfig.Load(Val(args, "--config")); }
         catch (Exception e) { Console.Error.WriteLine($"lan-line: cannot read config: {e.Message}"); return 2; }
@@ -52,13 +73,30 @@ public static class Headless
             }
             testSha = Hashing.Sha256File(testFile);
         }
+        var withFolder = args.Contains("--with-folder");   // selftest: also round-trip a test folder (needs a beta.6 peer)
+        string? testFolder = null;
+        Dictionary<string, string> testTree = [];
+        if (selftest && withFolder)
+        {
+            testFolder = Path.Combine(Path.GetTempPath(), $"lan-line-selftest-{Environment.ProcessId}", "Selftest Ünïcødé 📁");
+            void Put(string rel, byte[] d) { var u = Path.Combine(testFolder, rel); Directory.CreateDirectory(Path.GetDirectoryName(u)!); File.WriteAllBytes(u, d); }
+            Put("readme.txt", "top"u8.ToArray());
+            Put("日本/ファイル.txt", System.Text.Encoding.UTF8.GetBytes("日本語"));
+            for (var i = 0; i < 200; i++) Put($"d{i % 7}/sub{i % 3}/f{i}.txt", System.Text.Encoding.UTF8.GetBytes($"file {i}"));
+            Put("a/b/c/big.bin", RandomNumberGenerator.GetBytes(8 << 20));
+            Directory.CreateDirectory(Path.Combine(testFolder, "empty", "inner"));
+            testTree = Manifest(testFolder);
+        }
 
         Session? session = null;
-        bool started = false, gotText = false, gotFile = false;
+        bool started = false, gotText = false, gotFile = false, gotFolder = false;
         int connects = 0, disconnects = 0;
         var oneShot = new HashSet<string>();
         var sendText = Val(args, "--send-text");
         var sendFile = Val(args, "--send-file");
+        var sendFolder = Val(args, "--send-folder");
+        bool AllBack() => gotText && gotFile && (gotFolder || !withFolder);
+        string PassText() => $"text and {sizeMb} MB file{(withFolder ? $" and a {testTree.Count}-entry folder" : "")} came back intact";
 
         void Finish(bool ok, string why)
         {
@@ -74,17 +112,19 @@ public static class Headless
                 case SessionEvent.Connected c:
                     connects++;
                     Log("connected", new() { ["peer"] = c.Peer });
-                    if (!started && (sendText != null || sendFile != null))
+                    if (!started && (sendText != null || sendFile != null || sendFolder != null))
                     {
                         started = true;
                         if (sendText != null) oneShot.Add(session!.SendText(sendText).Id);
                         if (sendFile != null) oneShot.Add(session!.SendFile(sendFile).Id);
+                        if (sendFolder != null) oneShot.Add(session!.SendFolder(sendFolder).Id);
                     }
                     if (selftest && !started)
                     {
                         started = true;
                         session!.SendText(testText);
                         session!.SendFile(testFile!);
+                        if (testFolder != null) session!.SendFolder(testFolder);
                     }
                     break;
                 case SessionEvent.Disconnected d: disconnects++; Log("disconnected", new() { ["reason"] = d.Reason }); break;
@@ -92,14 +132,21 @@ public static class Headless
                     Log("received_text", new() { ["chars"] = r.Item.Text!.Length });
                     if (echo) session!.SendText(r.Item.Text!);
                     if (selftest && r.Item.Text == testText) { gotText = true; Log("selftest_text_ok"); }
-                    if (selftest && gotText && gotFile) Finish(true, $"text and {sizeMb} MB file came back intact");
+                    if (selftest && AllBack()) Finish(true, PassText());
+                    break;
+                case SessionEvent.Received r when r.Item.IsFolder:
+                    var same = withFolder && Manifest(r.Item.Path!).OrderBy(k => k.Key).SequenceEqual(testTree.OrderBy(k => k.Key));
+                    Log("received_folder", new() { ["name"] = r.Item.FileName, ["count"] = r.Item.Count, ["size"] = r.Item.Size, ["identical"] = same });
+                    if (echo) session!.SendFolder(r.Item.Path!);
+                    if (selftest && same) { gotFolder = true; Log("selftest_folder_ok"); }
+                    if (selftest && AllBack()) Finish(true, PassText());
                     break;
                 case SessionEvent.Received r:
                     var sha = Hashing.Sha256File(r.Item.Path!);
                     Log("received_file", new() { ["name"] = r.Item.FileName, ["size"] = r.Item.Size, ["sha256"] = sha });
                     if (echo) session!.SendFile(r.Item.Path!);
                     if (selftest && sha == testSha && r.Item.Size == (long)sizeMb << 20) { gotFile = true; Log("selftest_file_ok", new() { ["sha256"] = sha }); }
-                    if (selftest && gotText && gotFile) Finish(true, $"text and {sizeMb} MB file came back intact");
+                    if (selftest && AllBack()) Finish(true, PassText());
                     break;
                 case SessionEvent.Outgoing o when o.Item.State.Kind == ItemStateKind.Delivered:
                     Log("delivered", new() { ["id"] = o.Item.Id });
@@ -117,11 +164,12 @@ public static class Headless
                 case SessionEvent.Status st: Log("status", new() { ["text"] = st.Text }); break;
                 case SessionEvent.Rekeyed: Log("rekeyed", new()); break;
                 case SessionEvent.PeerAddresses pa: Log("peer_addresses", new() { ["count"] = pa.Addrs.Length.ToString() }); break;
+                case SessionEvent.UpdateAvailable ua: Log("update_available", new() { ["version"] = ua.Version, ["url"] = ua.Url }); break;
             }
         }
 
         var name = Val(args, "--name") ?? Environment.MachineName;
-        session = new Session(role, new SessionConfig { RekeyOnPair = args.Contains("--rekey-on-pair"), Advertise = role is Role.Listen ? [.. Discovery.LocalAddresses()] : [], Token = cfg.Token, Name = name, DownloadDir = downloads }, Handle);
+        session = new Session(role, new SessionConfig { RekeyOnPair = args.Contains("--rekey-on-pair"), Advertise = role is Role.Listen ? [.. Discovery.LocalAddresses()] : [], Token = cfg.Token, Name = name, DownloadDir = downloads, AppVersion = Val(args, "--app-version") ?? AppInfo.Version }, Handle);
         Log("start", new() { ["mode"] = selftest ? "selftest" : echo ? "echo" : "headless", ["downloads"] = downloads });
         if (selftest)
         {

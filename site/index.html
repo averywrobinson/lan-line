@@ -1123,7 +1123,7 @@
             </div>
             <h3 class="text-[17px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Drop, paste, or type</h3>
             <p class="text-[14px] leading-relaxed text-[#94A3B8] max-w-xs">
-              Drag in files, paste clipboard screenshots, or send URLs and terminal snippets straight into the pinned window.
+              Drag in files or whole folders, paste clipboard screenshots, or send URLs and terminal snippets straight into the pinned window.
             </p>
           </div>
 
@@ -1166,12 +1166,12 @@
           </div>
 
           <p class="text-[13.5px] text-[#94A3B8] mb-8">
-            No account required &nbsp;·&nbsp; macOS 14+ (Apple Silicon) &amp; Windows 10/11
+            No account required &nbsp;·&nbsp; macOS 13+ (Apple Silicon or Intel) &amp; Windows 10/11
           </p>
 
           <!-- Download Buttons wired directly to GitHub Releases + interactive modal -->
           <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-8">
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.5/Lan-Line-0.9.0-beta.5-mac.dmg"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.6/Lan-Line-0.9.0-beta.6-mac.dmg"
                onclick="openDownloadModal('macOS')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-8px_rgba(248,250,252,0.2)] active:scale-[0.985] transition-all">
               <!-- Minimal Apple icon -->
@@ -1181,7 +1181,7 @@
               <span>Download for macOS</span>
             </a>
 
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.5/Lan-Line-0.9.0-beta.5-windows-setup.exe"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.6/Lan-Line-0.9.0-beta.6-windows-setup.exe"
                onclick="openDownloadModal('Windows')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#F8FAFC] bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.13] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] active:scale-[0.985] transition-all">
               <!-- Minimal Windows 4-pane grid icon -->
@@ -1261,7 +1261,7 @@
           <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Public beta</p>
           <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC]">Help test Lan-Line.</h2>
           <p class="text-[14.5px] leading-relaxed text-[#94A3B8] mt-4">Install it on a Mac and a Windows PC on the same network, use it for a few days, and tell us what breaks or feels off.</p>
-          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating from beta.4:</span> update both computers. beta.5 encrypts everything and can’t talk to beta.4; until both are updated, the window says “Update Lan-Line on …”. Your pairing carries over.</p>
+          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating:</span> from beta.4, update both computers (beta.5 and later encrypt everything and can’t talk to beta.4; the window says “Update Lan-Line on …”). beta.5 and beta.6 work together, but sending folders needs beta.6 on both. Your pairing carries over.</p>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-3">
@@ -1271,7 +1271,7 @@
             </div>
             <ul class="flex flex-col gap-2 text-[13.5px] leading-relaxed text-[#94A3B8]">
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Pairing with the short code, both ways (Mac shows it, PC types it, and the reverse).</span></li>
-              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Text, files and pasted screenshots in both directions, including a few big files.</span></li>
+              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Text, files, whole folders and pasted screenshots in both directions, including a few big files and a folder with subfolders.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Minimize one window and send to it: it should pop back up without stealing your keyboard.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Storage settings: keep-for-days, the storage limit and “Clean up now”.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Light and dark mode, pin on top, and reconnecting after sleep or a network change.</span></li>
@@ -1285,8 +1285,7 @@
             <ul class="flex flex-col gap-2 text-[13.5px] leading-relaxed text-[#94A3B8]">
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Not code-signed yet: the first open needs a one-time OK (see the FAQ).</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Encryption hides what you send, not that you’re sending: someone on your network can still see how much moves and when. It can’t protect a computer that’s already compromised.</span></li>
-              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Folders can’t be sent yet; send the files inside, or a zip.</span></li>
-              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Mac: Apple Silicon and macOS 14 or later. Windows: 10 (1809+) or 11, 64-bit.</span></li>
+                            <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Mac: macOS 13+ (Apple Silicon or Intel). Windows: 10 (1809+) or 11, 64-bit.</span></li>
             </ul>
           </div>
           <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-3">
@@ -1297,6 +1296,7 @@
             <ul class="flex flex-col gap-2 text-[13.5px] leading-relaxed text-[#94A3B8]">
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span><a href="https://github.com/averywrobinson/lan-line/issues/new?template=bug_report.yml" target="_blank" rel="noopener noreferrer" class="text-sky-200/90 hover:text-sky-200 underline underline-offset-2">Report a bug</a>: both OS versions, the Lan-Line version and the steps.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span><a href="https://github.com/averywrobinson/lan-line/issues/new?template=beta_feedback.yml" target="_blank" rel="noopener noreferrer" class="text-sky-200/90 hover:text-sky-200 underline underline-offset-2">Share feedback</a>: what worked, what felt off, what you’d change.</span></li>
+              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Get an email for each release: on <a href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer" class="text-sky-200/90 hover:text-sky-200 underline underline-offset-2">GitHub</a>, Watch → Custom → Releases.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Security problems: <a href="https://github.com/averywrobinson/lan-line/security/advisories/new" target="_blank" rel="noopener noreferrer" class="text-sky-200/90 hover:text-sky-200 underline underline-offset-2">report privately</a>, not in a public issue.</span></li>
             </ul>
           </div>
@@ -1333,7 +1333,7 @@
             <div class="faq-content">
               <div class="faq-inner px-6 pb-5">
                 <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
-                  Never. Every message, pasted screenshot, and file travels directly from one machine to the other over your local network (LAN). There are no cloud relays, no user accounts, and zero telemetry tracking your transfers. On the way, everything is encrypted (AES-256-GCM with fresh keys for each connection), and your pairing code or secret is never sent in the clear.
+                  Never. Every message, pasted screenshot, and file travels directly from one machine to the other over your local network (LAN). There are no cloud relays, no user accounts, and zero telemetry tracking your transfers. Your files and messages never leave your network. Lan-Line only goes online when you click Check for Updates or turn on daily checks. (That check reads one small file from this site and sends no ID.) On the way, everything is encrypted (AES-256-GCM with fresh keys for each connection), and your pairing code or secret is never sent in the clear.
                 </p>
               </div>
             </div>
@@ -1393,7 +1393,7 @@
             <div class="faq-content">
               <div class="faq-inner px-6 pb-5">
                 <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
-                  No artificial caps. Because files stream directly across your local network rather than through a cloud server, a 25-byte config file and a 4 GB video export both move at whatever speed your router or Ethernet switch supports.
+                  No artificial caps. Because files stream directly across your local network rather than through a cloud server, a 25-byte config file, a 4 GB video export and a whole project folder all move at whatever speed your router or Ethernet switch supports. If the other computer doesn’t have room, it says so before anything is sent.
                 </p>
               </div>
             </div>
@@ -1505,7 +1505,7 @@
            class="hover:text-[#CBD5E1] transition-colors">
           Issues
         </a>
-        <button type="button" onclick="showToast('100% local LAN · Encrypted end to end · No cloud storage or analytics')" class="hover:text-[#CBD5E1] transition-colors">Privacy</button>
+        <button type="button" onclick="showToast('Your files never leave your network · Online only for update checks you ask for')" class="hover:text-[#CBD5E1] transition-colors">Privacy</button>
         <button type="button" onclick="showToast('Paired with a one-time code · LAN traffic isn’t encrypted in this beta')" class="hover:text-[#CBD5E1] transition-colors">Security</button>
         <span class="text-[#475569]">v0.9 beta · MIT · © 2026 Lan-Line</span>
       </div>
@@ -1535,7 +1535,7 @@
         </div>
         <div>
           <h3 id="modalTitle" class="text-[16px] font-semibold text-[#F8FAFC]">Lan-Line for macOS</h3>
-          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.5 · macOS 14+ · Apple Silicon</p>
+          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.6 · macOS 13+ · Apple Silicon or Intel</p>
         </div>
       </div>
 
@@ -1556,7 +1556,7 @@
           <button type="button" id="copyReleaseUrlBtn" onclick="copyModalReleaseUrl()" class="font-mono text-[10.5px] text-sky-300 hover:text-sky-200">Copy URL</button>
         </div>
         <p id="modalReleaseUrl" class="font-mono text-[11px] text-[#CBD5E1] break-all leading-relaxed">
-          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.5/Lan-Line-0.9.0-beta.5-mac.dmg
+          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.6/Lan-Line-0.9.0-beta.6-mac.dmg
         </p>
         <p class="text-[11.5px] text-[#64748B] mt-1.5">
           <span id="modalFirstOpen">Beta builds aren’t code-signed yet; the first open asks for a one-time OK.</span>
@@ -2284,14 +2284,14 @@
       const INSTALLER_META = {
         macOS: {
           title: 'Lan-Line for macOS',
-          subtitle: 'v0.9.0-beta.5 · macOS 14+ · Apple Silicon · 2.2 MB DMG',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.5/Lan-Line-0.9.0-beta.5-mac.dmg',
+          subtitle: 'v0.9.0-beta.6 · macOS 13+ · Apple Silicon or Intel · 2.7 MB DMG',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.6/Lan-Line-0.9.0-beta.6-mac.dmg',
           firstOpen: 'Open the DMG and drag Lan-Line to Applications. First open: click Done, then System Settings → Privacy & Security → Open Anyway.',
         },
         Windows: {
           title: 'Lan-Line for Windows',
-          subtitle: 'v0.9.0-beta.5 · Windows 10/11 (x64) · 43 MB setup',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.5/Lan-Line-0.9.0-beta.5-windows-setup.exe',
+          subtitle: 'v0.9.0-beta.6 · Windows 10/11 (x64) · 43 MB setup',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.6/Lan-Line-0.9.0-beta.6-windows-setup.exe',
           firstOpen: 'Run the setup (no admin needed). If SmartScreen appears, choose More info → Run anyway.',
         },
       };
