@@ -14,19 +14,24 @@ public struct Frame: Codable, Sendable, Equatable {
     public var err: String?
     /// In `hello_ok` right after pairing: the long-term secret that replaces the short pairing code.
     public var rekey: String?
+    /// In `hello_ok`: the listener's own addresses (LAN, Tailscale…), so the dialer has fallbacks.
+    public var addrs: [String]?
 
     public init(type: String, v: Int? = nil, token: String? = nil, name: String? = nil, id: String? = nil,
                 text: String? = nil, size: Int64? = nil, sha256: String? = nil, ok: Bool? = nil, err: String? = nil,
-                rekey: String? = nil) {
+                rekey: String? = nil, addrs: [String]? = nil) {
         self.type = type; self.v = v; self.token = token; self.name = name; self.id = id
         self.text = text; self.size = size; self.sha256 = sha256; self.ok = ok; self.err = err; self.rekey = rekey
+        self.addrs = addrs
     }
 
     public static let protocolVersion = 1
 
     /// `rekey: "?"` in a hello says "I can take a new long-term secret" (0.9.0-beta.2 and later).
     public static func hello(token: String, name: String) -> Frame { Frame(type: "hello", v: protocolVersion, token: token, name: name, rekey: "?") }
-    public static func helloOK(name: String, rekey: String? = nil) -> Frame { Frame(type: "hello_ok", name: name, rekey: rekey) }
+    public static func helloOK(name: String, rekey: String? = nil, addrs: [String]? = nil) -> Frame {
+        Frame(type: "hello_ok", name: name, rekey: rekey, addrs: addrs)
+    }
     public static func text(id: String, text: String) -> Frame { Frame(type: "text", id: id, text: text) }
     public static func fileBegin(id: String, name: String, size: Int64, sha256: String) -> Frame {
         Frame(type: "file_begin", name: name, id: id, size: size, sha256: sha256)

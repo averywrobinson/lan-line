@@ -33,7 +33,7 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("queue drained after reconnect", T.QueueAfterReconnect), ("drop mid-file resends", T.DropMidFile),
     ("new peer replaces old", T.NewPeerReplaces), ("pair codes", T.PairCodes),
     ("discovery reply round trip", T.DiscoveryReply), ("discovery over loopback", T.DiscoveryLoopback),
-    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey), ("storage cleanup rules", T.StorageRules),
+    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey), ("storage cleanup rules", T.StorageRules), ("listener addresses reach dialer", T.PeerAddrs),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -475,6 +475,18 @@ static class T
         ReceivedLog.Save([F("a", 1, 1)], Path.Combine(dir, "received.json"));
         H.Eq(F("a", 1, 1), ReceivedLog.Load(Path.Combine(dir, "received.json")).Single(), "log round trip");
         return Task.CompletedTask;
+    }
+
+    public static async Task PeerAddrs()
+    {
+        var lc = new SessionConfig { Token = H.Token, Name = "ad-l", DownloadDir = H.TempDir("ad-l"), Advertise = ["192.168.1.20", "100.64.0.7", "not-an-ip", "999.1.1.1"] };
+        var (s, _, port) = await H.Listener("ad-l", lc);
+        using var __ = s;
+        var drec = new Recorder();
+        using var d = new Session(new Role.Dial(["127.0.0.1"], port), H.Cfg("ad-d"), drec.Add);
+        d.Start();
+        await H.Until(() => drec.All.OfType<SessionEvent.PeerAddresses>().Any(), "addresses", 5);
+        H.Eq("192.168.1.20,100.64.0.7", string.Join(",", drec.All.OfType<SessionEvent.PeerAddresses>().First().Addrs), "valid IPv4 only");
     }
 
     public static async Task DeadLink()

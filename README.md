@@ -38,14 +38,24 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 - **Storage you control.** Keep received files forever or for 1–90 days (or custom), set a storage limit with gentle warnings, and optionally move the oldest files to the Trash / Recycle Bin. Nothing is deleted unless you turn it on.
 - **Follows your theme.** Smoked glass in dark mode, a matching light look, on both systems.
 
-![Features](assets/feature-slide.png)
+## Screenshots
+
+Real windows from this build (sample conversation):
+
+| Mac (dark) | Windows (dark) |
+|---|---|
+| ![Lan-Line on macOS, dark](assets/screens/mac-dark.png) | ![Lan-Line on Windows, dark](assets/screens/windows-dark.png) |
+| **Mac (light)** | **Windows (light)** |
+| ![Lan-Line on macOS, light](assets/screens/mac-light.png) | ![Lan-Line on Windows, light](assets/screens/windows-light.png) |
+| **Pairing with a short code** | **Storage settings** |
+| ![Pairing screen](assets/screens/mac-pairing.png) | ![Storage settings](assets/screens/mac-settings.png) |
 
 ## Install
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.3-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
-| **Windows** | `Lan-Line-0.9.0-beta.3-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.4-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
+| **Windows** | `Lan-Line-0.9.0-beta.4-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew:
 

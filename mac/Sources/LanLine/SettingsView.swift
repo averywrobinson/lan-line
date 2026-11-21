@@ -15,6 +15,7 @@ struct SettingsView: View {
 
     var body: some View {
         let p = Palette.of(scheme)
+        VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -68,8 +69,17 @@ struct SettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(p.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if model.unmanagedCount > 0 {
+                    Text("Also in the folder: \(model.unmanagedCount) file\(model.unmanagedCount == 1 ? "" : "s") (\(Cleanup.formatBytes(model.unmanagedBytes))) from before this version or added by you. Lan-Line leaves these alone.")
+                        .font(.system(size: 11)).foregroundStyle(p.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 8)
+        }
+            Rectangle().fill(p.hairline).frame(height: 1)
+            VStack(alignment: .leading, spacing: 8) {   // pinned: Save never scrolls out of view
                 if let error { Text(error).font(.system(size: 11)).foregroundStyle(p.danger) }
-
                 HStack(spacing: 10) {
                     Button("Open folder") { model.settingsActions.openFolder() }.controlSize(.small)
                     Button("Clean up now") { if let s = build() { model.settingsActions.save(s); model.settingsActions.cleanNow() } }
@@ -87,7 +97,7 @@ struct SettingsView: View {
                     .buttonStyle(.plain).keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(.horizontal, 20).padding(.vertical, 16)
+            .padding(.horizontal, 20).padding(.vertical, 12)
         }
         .onAppear(perform: load)
     }

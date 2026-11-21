@@ -27,7 +27,7 @@ struct Palette {
     static let light = Palette(
         bgTop: Color(red: 0.984, green: 0.988, blue: 0.992), bgBottom: Color(red: 0.937, green: 0.945, blue: 0.957),
         glow: Color(red: 0.55, green: 0.70, blue: 0.95).opacity(0.10), hairline: .black.opacity(0.08),
-        text: .black.opacity(0.87), textSecondary: .black.opacity(0.52), icon: .black.opacity(0.45),
+        text: .black.opacity(0.87), textSecondary: .black.opacity(0.64), icon: .black.opacity(0.55),
         outFill: .black.opacity(0.045), outStroke: .black.opacity(0.07),
         inFill: Color(red: 0.86, green: 0.92, blue: 0.985), inStroke: Color(red: 0.66, green: 0.78, blue: 0.92),
         cardFill: .white, cardStroke: .black.opacity(0.09),

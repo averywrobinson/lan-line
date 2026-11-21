@@ -19,6 +19,7 @@ sealed partial class MainWindow
     DispatcherTimer? _cleanupTimer;
     FrameworkElement? _settingsPanel;
     long _usageBytes;
+    double? _heightBeforeSettings, _topBeforeSettings;
 
     // panel parts
     readonly TextBlock _setFirstRun = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
@@ -28,6 +29,7 @@ sealed partial class MainWindow
     readonly StackPanel _overRow = new();
     readonly TextBlock _usageText = new() { FontSize = 12, Margin = new Thickness(0, 14, 0, 5) };
     readonly ProgressBar _usageBar = new() { Height = 5, Maximum = 1 };
+    readonly TextBlock _unmanagedText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
     readonly TextBlock _setError = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
     readonly Button _setCancel = new() { Content = "Cancel" };
 
@@ -53,6 +55,7 @@ sealed partial class MainWindow
         _showingSettings = true;
         if (Height < 600)
         {
+            _heightBeforeSettings = Height; _topBeforeSettings = Top;
             var grow = 600 - Height;
             Height = 600;
             Top = Math.Max(SystemParameters.WorkArea.Top + 8, Top - grow);
@@ -60,7 +63,17 @@ sealed partial class MainWindow
         ApplyScreen();
     }
 
-    void CloseSettings() { _showingSettings = false; ApplyScreen(); }
+    void CloseSettings()
+    {
+        _showingSettings = false;
+        ApplyScreen();
+        if (_heightBeforeSettings is { } h && WindowState == WindowState.Normal && !_pairing)   // back to the size it had
+        {
+            Height = h;
+            if (_topBeforeSettings is { } t) Top = t;
+        }
+        _heightBeforeSettings = _topBeforeSettings = null;
+    }
 
     /// <summary>Which middle area shows: settings over everything, else pairing, else the feed and composer.</summary>
     void ApplyScreen()
@@ -79,7 +92,18 @@ sealed partial class MainWindow
         RunCleanup(manual: false);
     }
 
-    void RefreshUsage() => _usageBytes = ReceivedLog.Load(LogPath).Where(f => File.Exists(f.Path)).Sum(f => f.Size);
+    void RefreshUsage()
+    {
+        var existing = ReceivedLog.Load(LogPath).Where(f => File.Exists(f.Path)).ToList();
+        _usageBytes = existing.Sum(f => f.Size);
+        // Files in the folder that Lan-Line doesn't manage (received before 0.9.0-beta.3, or put there by hand).
+        var managed = existing.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var others = Directory.Exists(DownloadsPath)
+            ? new DirectoryInfo(DownloadsPath).GetFiles().Where(f => !f.Name.StartsWith('.') && (f.Attributes & FileAttributes.Hidden) == 0 && !managed.Contains(f.FullName)).ToList()
+            : [];
+        _unmanagedText.Text = $"Also in the folder: {others.Count} file{(others.Count == 1 ? "" : "s")} ({Cleanup.FormatBytes(others.Sum(f => f.Length))}) from before this version or added by you. Lan-Line leaves these alone.";
+        _unmanagedText.Visibility = others.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     /// <summary>Move expired / over-limit received files to the Recycle Bin, then say so quietly. Never touches anything else.</summary>
     void RunCleanup(bool manual)
@@ -106,7 +130,7 @@ sealed partial class MainWindow
                 _storage.LastTrashReminder = now; changed = true;
             }
         }
-        else if (manual) Note($"Nothing to clean up. Received files use {Cleanup.FormatBytes(plan.UsageBytes)}.");
+        else if (manual) Note($"Nothing to clean up. Received files use {Cleanup.FormatBytes(plan.UsageBytes)}.", fadeAfter: 6);
         if (Cleanup.ShouldWarnLimit(_storage, plan.Level, now) || (manual && plan.Level > 0))
         {
             var used = Cleanup.FormatBytes(plan.UsageBytes); var lim = Cleanup.FormatBytes(plan.LimitBytes);
@@ -163,8 +187,9 @@ sealed partial class MainWindow
         var note = new TextBlock { Text = "Only files Lan-Line received are ever moved, and only to the Recycle Bin, so you can still get them back.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
         note.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(note);
+        _unmanagedText.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(_unmanagedText);
         _setError.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
-        col.Children.Add(_setError);
 
         var open = new Button { Content = "Open folder" };
         var clean = new Button { Content = "Clean up now", ToolTip = "Saves these settings and applies them now" };
@@ -177,13 +202,22 @@ sealed partial class MainWindow
         _setCancel.SetResourceReference(StyleProperty, "LinkButton");
         _setCancel.VerticalAlignment = VerticalAlignment.Center;
         _setCancel.Click += (_, _) => CloseSettings();
-        var buttons = new DockPanel { Margin = new Thickness(0, 16, 0, 0), LastChildFill = false };
+        var buttons = new DockPanel { Margin = new Thickness(0, 8, 0, 0), LastChildFill = false };
         DockPanel.SetDock(save, Dock.Right); DockPanel.SetDock(_setCancel, Dock.Right);
         buttons.Children.Add(open); buttons.Children.Add(clean); buttons.Children.Add(save); buttons.Children.Add(_setCancel);
-        col.Children.Add(buttons);
-
         foreach (var w in new[] { _retPills, _limPills }) foreach (RadioButton r in w.Children) r.Checked += (_, _) => RefreshCustomBoxes();
-        return new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col };
+        // Pinned bar: the error line and Save never scroll out of view.
+        var bar = new StackPanel { Margin = new Thickness(22, 4, 22, 14) };
+        _setError.Margin = new Thickness(0, 6, 0, 0);
+        bar.Children.Add(_setError);
+        bar.Children.Add(buttons);
+        var barBorder = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Child = bar };
+        barBorder.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        var dock = new DockPanel();
+        DockPanel.SetDock(barBorder, Dock.Bottom);
+        dock.Children.Add(barBorder);
+        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col });
+        return dock;
     }
 
     static TextBlock Label(string text)

@@ -29,6 +29,8 @@ public struct SessionConfig: Sendable {
     /// Listener, while pairing: answer the first good hello with a fresh 32-byte secret (`rekey`) and switch to
     /// it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.
     public var rekeyOnPair = false
+    /// Listener: addresses to tell an authenticated dialer about (its fallbacks if one stops working).
+    public var advertise: [String] = []
 
     public init(token: String, name: String, downloadDir: URL) {
         self.token = token; self.name = name; self.downloadDir = downloadDir
@@ -75,6 +77,8 @@ public enum SessionEvent: Sendable, Equatable {
     case status(String)
     /// The pairing code was swapped for this long-term secret (both sides); save it in the config.
     case rekeyed(token: String)
+    /// Dialer: the listener's addresses (from hello_ok); keep them as fallback hosts.
+    case peerAddresses([String])
 }
 
 /// The one Lan-Line session object. The window, the headless mode and the tests all drive this.
@@ -311,7 +315,7 @@ public final class Session: @unchecked Sendable {
             oldToken = token
             token = rekey!
         }
-        l.send(text: Frame.helloOK(name: config.name, rekey: rekey).json)
+        l.send(text: Frame.helloOK(name: config.name, rekey: rekey, addrs: config.advertise.isEmpty ? nil : config.advertise).json)
         if let rekey { emit(.rekeyed(token: rekey)) }
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
@@ -324,7 +328,14 @@ public final class Session: @unchecked Sendable {
             token = r
             emit(.rekeyed(token: r))
         }
+        let addrs = (f.addrs ?? []).filter(Self.isIPv4).prefix(8)
+        if !addrs.isEmpty { emit(.peerAddresses(Array(addrs))) }
         becomeUp(l, peer: f.name ?? l.peerDescription)
+    }
+
+    static func isIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { p in p.count <= 3 && Int(p).map { (0...255).contains($0) } ?? false }
     }
 
     private func becomeUp(_ l: Link, peer: String) {

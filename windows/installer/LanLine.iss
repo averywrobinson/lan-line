@@ -4,12 +4,13 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.3"
+#define AppVersionFull "0.9.0-beta.4"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif
+; The MIT license, one line per paragraph, so the wizard's license box wraps it cleanly.
 #ifndef LicensePath
-  #define LicensePath "..\..\LICENSE"
+  #define LicensePath "License.txt"
 #endif
 #ifndef OutDir
   #define OutDir "..\..\dist"
@@ -59,6 +60,9 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; replaces, so an upgrade would otherwise keep these next to LanLine.Core.dll.
 Type: files; Name: "{app}\Ferry.Core.dll"
 Type: files; Name: "{app}\Ferry.Core.pdb"
+; Builds up to 0.9.0-beta.3 also shipped .pdb files, which carry the build machine's source path.
+; The build no longer makes them (DebugType=none), so remove any an older install left behind.
+Type: files; Name: "{app}\*.pdb"
 
 [Icons]
 Name: "{userprograms}\Lan-Line"; Filename: "{app}\Lan-Line.exe"

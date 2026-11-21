@@ -14,7 +14,7 @@
     <StartupObject>LanLine.App.Program</StartupObject>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>0.9.0</Version>
-    <InformationalVersion>0.9.0-beta.3</InformationalVersion>
+    <InformationalVersion>0.9.0-beta.4</InformationalVersion>
     <Copyright>Lan-Line. MIT License.</Copyright>
   </PropertyGroup>
   <ItemGroup>

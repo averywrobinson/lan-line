@@ -31,6 +31,8 @@ public sealed class SessionConfig
     /// <summary>Listener, while pairing: answer the first good hello with a fresh 32-byte secret (rekey) and switch
     /// to it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.</summary>
     public bool RekeyOnPair { get; init; }
+    /// <summary>Listener: addresses to tell an authenticated dialer about (its fallbacks).</summary>
+    public string[] Advertise { get; init; } = [];
     /// <summary>Liveness tick period; zero = no timer (tests call Tick themselves).</summary>
     public TimeSpan TickInterval { get; init; } = TimeSpan.FromSeconds(1);
 }
@@ -57,6 +59,8 @@ public abstract record SessionEvent
     public sealed record Connected(string Peer) : SessionEvent;
     /// <summary>The pairing code was swapped for this long-term secret (both sides); save it in the config.</summary>
     public sealed record Rekeyed(string Token) : SessionEvent;
+    /// <summary>Dialer: the listener's addresses (from hello_ok); keep them as fallback hosts.</summary>
+    public sealed record PeerAddresses(string[] Addrs) : SessionEvent;
     public sealed record Disconnected(string Reason) : SessionEvent;
     public sealed record Received(Item Item) : SessionEvent;
     public sealed record Outgoing(Item Item) : SessionEvent;
@@ -279,7 +283,7 @@ public sealed class Session : IDisposable
             _oldToken = _token;
             _token = rekey;
         }
-        l.SendText(Frame.HelloOk(Config.Name, rekey).Json);
+        l.SendText(Frame.HelloOk(Config.Name, rekey, Config.Advertise.Length > 0 ? Config.Advertise : null).Json);
         if (rekey != null) Emit(new SessionEvent.Rekeyed(rekey));
         BecomeUp(l, f.Name ?? l.Peer);
     }
@@ -295,6 +299,8 @@ public sealed class Session : IDisposable
             _token = r;
             Emit(new SessionEvent.Rekeyed(r));
         }
+        var addrs = (f.Addrs ?? []).Where(a => System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && a.Count(c => c == '.') == 3).Take(8).ToArray();
+        if (addrs.Length > 0) Emit(new SessionEvent.PeerAddresses(addrs));
         BecomeUp(l, f.Name ?? l.Peer);
     }
 

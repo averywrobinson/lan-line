@@ -365,4 +365,17 @@ final class RekeyTests: XCTestCase {
         let bad = try? await c4.hello(token: "ZZZZZ99999")
         XCTAssertNotEqual((bad ?? nil)?.type, "hello_ok")
     }
+
+    /// The listener tells the dialer its addresses; junk is filtered out.
+    func testListenerAddressesReachDialer() async throws {
+        var lc = makeConfig("ad-l"); lc.advertise = ["192.168.1.20", "100.64.0.7", "not-an-ip", "999.1.1.1"]
+        let (srv, _, port) = await startListener("ad-l", config: lc)
+        defer { srv.stop() }
+        let drec = Recorder()
+        let d = Session(role: .dialer(hosts: ["127.0.0.1"], port: port), config: makeConfig("ad-d")) { drec.add($0) }
+        d.start(); defer { d.stop() }
+        await waitUntil(5, "connected") { drec.connectedCount == 1 }
+        let got = drec.all.compactMap { if case .peerAddresses(let a) = $0 { return a }; return nil }.first
+        XCTAssertEqual(got, ["192.168.1.20", "100.64.0.7"])
+    }
 }

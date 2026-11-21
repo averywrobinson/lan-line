@@ -27,7 +27,8 @@ sealed partial class MainWindow : Window
     readonly Button _max = new() { Content = Glyph_Max };
     readonly StackPanel _feed = new() { Margin = new Thickness(14, 12, 14, 8) };
     readonly ScrollViewer _scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-    readonly TextBox _input = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 96, MinHeight = 20, VerticalAlignment = VerticalAlignment.Center };
+    // Fixed 18 px lines and a 5-line cap, so a long message scrolls by whole lines (no half-clipped top line).
+    readonly TextBox _input = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 90, MinHeight = 18, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _placeholder = new() { FontSize = 13, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center };
     readonly Button _send = new() { Content = Glyph_Up, IsEnabled = false, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Bottom };
     readonly FrameworkElement _empty;
@@ -64,6 +65,8 @@ sealed partial class MainWindow : Window
         StateChanged += (_, _) =>
         {
             _max.Content = WindowState == WindowState.Maximized ? Glyph_Restore : Glyph_Max;
+            _max.ToolTip = WindowState == WindowState.Maximized ? "Restore" : "Maximize";
+            Automation(_max, WindowState == WindowState.Maximized ? "Restore" : "Maximize");
             Padding = WindowState == WindowState.Maximized ? new Thickness(7) : new Thickness(0);   // keep content on screen
         };
 
@@ -111,6 +114,8 @@ sealed partial class MainWindow : Window
 
         // ---- composer: rounded box, placeholder, round send button (shown when there is text)
         _input.SetResourceReference(StyleProperty, "InputBox");
+        TextBlock.SetLineHeight(_input, 18);
+        TextBlock.SetLineStackingStrategy(_input, LineStackingStrategy.BlockLineHeight);
         _placeholder.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         Automation(_input, "Message");
         _send.SetResourceReference(StyleProperty, "SendButton");
@@ -286,6 +291,7 @@ sealed partial class MainWindow : Window
         {
             case SessionEvent.Listening: _statusText = $"Waiting for {Away}…"; break;
             case SessionEvent.Rekeyed rk: Rekeyed(rk.Token); break;
+            case SessionEvent.PeerAddresses pa: PeerAddresses(pa.Addrs); break;
             case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
             case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
             case SessionEvent.Status s: if (!_connected) _statusText = s.Text.StartsWith("dialing") ? $"Connecting to {Away}…" : $"Can't reach {Away}"; break;
@@ -328,6 +334,16 @@ sealed partial class MainWindow : Window
         row = new ItemRow(item, this);
         _rows[item.Id] = row;
         Append(row.View);
+    }
+
+    /// <summary>A passing remark that removes itself after a few seconds.</summary>
+    void Note(string s, double fadeAfter)
+    {
+        Note(s);
+        var row = _feed.Children[^1];
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(fadeAfter) };
+        t.Tick += (_, _) => { t.Stop(); _feed.Children.Remove(row); RefreshEmpty(); };
+        t.Start();
     }
 
     void Note(string s)

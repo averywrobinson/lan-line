@@ -64,6 +64,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsURL: URL { options.configURL.deletingLastPathComponent().appendingPathComponent("settings.json") }
     private var logURL: URL { options.configURL.deletingLastPathComponent().appendingPathComponent("received.json") }
     private var cleanupTimer: Timer?
+    private var frameBeforeSettings: NSRect?
 
     private func setUpStorage() {
         model.storage = StorageSettings.load(from: settingsURL)
@@ -76,7 +77,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 NSWorkspace.shared.open(dir)
             },
-            cancel: { [weak self] in self?.model.showingSettings = false })
+            cancel: { [weak self] in self?.model.showingSettings = false; self?.restoreAfterSettings() })
         runCleanup(manual: false)
         let t = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.runCleanup(manual: false) } }
         RunLoop.main.add(t, forMode: .common)
@@ -88,6 +89,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.settingsFirstRun = firstRun
         refreshUsage()
         model.showingSettings = true
+        if panel.frame.height < 470 { frameBeforeSettings = panel.frame }
         growPanel(to: 470)
     }
 
@@ -99,7 +101,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do { try n.save(to: settingsURL) } catch { model.note("Couldn't save settings: \(error.localizedDescription)") }
         model.showingSettings = false
         model.settingsFirstRun = false
+        restoreAfterSettings()
         runCleanup(manual: false)
+    }
+
+    /// Settings grew the window; put it back as it was (unless pairing still needs the room).
+    private func restoreAfterSettings() {
+        if let f = frameBeforeSettings, !model.pairing { panel.setFrame(f, display: true, animate: true) }
+        frameBeforeSettings = nil
     }
 
     private func logReceived(_ url: URL, size: Int64) {
@@ -113,6 +122,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func refreshUsage() {
         let existing = ReceivedLog.load(from: logURL).filter { FileManager.default.fileExists(atPath: $0.path) }
         model.usageBytes = existing.reduce(0) { $0 + $1.size }
+        // Files in the folder that Lan-Line doesn't manage (received before 0.9.0-beta.3, or put there by hand).
+        let dir = options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir
+        let managed = Set(existing.map(\.path))
+        let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
+        var n = 0, bytes: Int64 = 0
+        for u in items where !managed.contains(u.path) {
+            guard let v = try? u.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
+            n += 1; bytes += Int64(v.fileSize ?? 0)
+        }
+        model.unmanagedCount = n; model.unmanagedBytes = bytes
     }
 
     /// Move expired / over-limit received files to the Trash, then say so quietly. Never deletes anything else.
@@ -144,7 +163,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 s.lastTrashReminder = now; changed = true
             }
         } else if manual {
-            model.note("Nothing to clean up. Received files use \(Cleanup.formatBytes(plan.usageBytes)).")
+            model.note("Nothing to clean up. Received files use \(Cleanup.formatBytes(plan.usageBytes)).", fadeAfter: 6)
         }
         if Cleanup.shouldWarnLimit(s, level: plan.level, now: now) || (manual && plan.level > 0) {
             let used = Cleanup.formatBytes(plan.usageBytes), lim = Cleanup.formatBytes(plan.limitBytes)
@@ -201,6 +220,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var sc = SessionConfig(token: cfg.token, name: options.name,
                                downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir)
         sc.rekeyOnPair = pairing && !cfg.connects
+        if !cfg.connects && options.value("--connect") == nil { sc.advertise = Discovery.localAddresses() }
         // The one main-thread hop: the Session calls this on its own queue.
         let s = Session(role: options.role(cfg), config: sc) { [weak self] event in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(event) } }
@@ -216,6 +236,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if case .rekeyed(let t) = e {   // the pairing code was swapped for a long-term secret
             if var p = pending { p.token = t; pending = p }
             else if var c = config { c.token = t; save(c); config = c }
+        }
+        if case .peerAddresses(let a) = e {   // the partner's other addresses become fallback hosts
+            func merged(_ h: [String]?) -> [String] { var out: [String] = []; for x in (h ?? []) + a where !out.contains(x) { out.append(x) }; return Array(out.prefix(6)) }
+            if var p = pending, p.connects { p.hosts = merged(p.hosts); pending = p }
+            else if var c = config, c.connects, merged(c.hosts) != (c.hosts ?? []) { c.hosts = merged(c.hosts); save(c); config = c }
         }
         model.handle(e)
         // --debug-paste PATH: once connected, put PATH on the clipboard the way Finder's Copy does and run Paste.

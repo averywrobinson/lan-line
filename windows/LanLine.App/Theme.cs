@@ -33,8 +33,8 @@ static class Theme
         ["BgBottom"] = ("#11151C", "#EFF1F4"),
         ["Hairline"] = ("#14FFFFFF", "#14000000"),
         ["Text"] = ("#FFF8FAFC", "#DE000000"),
-        ["Text2"] = ("#FF94A3B8", "#85000000"),
-        ["Icon"] = ("#FF94A3B8", "#73000000"),
+        ["Text2"] = ("#FF94A3B8", "#A3000000"),   // light: 64 % black on #EFF1F4, about 6:1
+        ["Icon"] = ("#FF94A3B8", "#8C000000"),
         ["OutFill"] = ("#AD444A56", "#0B000000"),
         ["OutStroke"] = ("#24FFFFFF", "#12000000"),
         ["InFill"] = ("#D9263B54", "#FFDBEBFB"),
@@ -52,6 +52,9 @@ static class Theme
         ["Scroll"] = ("#40FFFFFF", "#33000000"),
         ["DropFill"] = ("#1A4085F5", "#142673EB"),
         ["PinOn"] = ("#FFE0463A", "#FFD2392D"),
+        ["MenuBg"] = ("#FF1E232C", "#FFFFFFFF"),
+        ["MenuHover"] = ("#FF2C3442", "#FFE9EDF3"),
+        ["MenuStroke"] = ("#33FFFFFF", "#24000000"),
     };
 
     public static void Apply(ResourceDictionary res)

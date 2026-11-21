@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import LanLineCore
 import Observation
 
@@ -31,6 +32,8 @@ final class AppModel {
     var settingsFirstRun = false
     var storage = StorageSettings()
     var usageBytes: Int64 = 0
+    var unmanagedCount = 0
+    var unmanagedBytes: Int64 = 0
     var removedPaths: Set<String> = []
 
     // pairing
@@ -71,7 +74,7 @@ final class AppModel {
         case .outgoing(let item): upsert(item)
         case .receiveFailed(let name, let reason): note("Couldn't receive \(name): \(reason)"); onPopUp()
         case .error(let msg): if !pairing { note(msg) }
-        case .rekeyed: break   // the controller saves the new secret
+        case .rekeyed, .peerAddresses: break   // the controller saves these
         }
     }
 
@@ -80,7 +83,15 @@ final class AppModel {
         append(Row(id: item.id, item: item))
     }
 
-    func note(_ s: String) { append(Row(id: UUID().uuidString, note: s)) }
+    func note(_ s: String, fadeAfter: TimeInterval? = nil) {
+        let id = UUID().uuidString
+        append(Row(id: id, note: s))
+        if let t = fadeAfter {   // a passing remark, not something to keep in the feed
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
+                MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.3)) { self?.rows.removeAll { $0.id == id } } }
+            }
+        }
+    }
 
     private func append(_ r: Row) {
         rows.append(r)

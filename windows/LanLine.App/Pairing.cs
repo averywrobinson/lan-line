@@ -72,7 +72,8 @@ sealed partial class MainWindow
     void StartSession(LanLineConfig cfg, bool pairing = false)
     {
         Role role = Listens(cfg) ? new Role.Listen(Port) : new Role.Dial(Arg(_args, "--connect")?.Split(',') ?? cfg.Hosts, Port);
-        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, RekeyOnPair = pairing && Listens(cfg) };
+        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, RekeyOnPair = pairing && Listens(cfg),
+            Advertise = Listens(cfg) && Arg(_args, "--connect") == null ? [.. Discovery.LocalAddresses()] : [] };
         // The one UI-thread hop: the Session calls this on its own queue thread.
         _session = new Session(role, config, e => Dispatcher.BeginInvoke(() => Handle(e)));
         _session.Start();
@@ -110,6 +111,18 @@ sealed partial class MainWindow
     {
         if (_pending is { } p) p.Token = token;
         else if (_config is { } c) { c.Token = token; Save(c); }
+    }
+
+    /// <summary>The partner's other addresses become fallback hosts (the typed or working one stays first).</summary>
+    void PeerAddresses(string[] addrs)
+    {
+        string[] Merged(string[] h) => h.Concat(addrs).Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToArray();
+        if (_pending is { } p && !p.Listens) p.Hosts = Merged(p.Hosts);
+        else if (_config is { } c && !Listens(c))
+        {
+            var m = Merged(c.Hosts);
+            if (!m.SequenceEqual(c.Hosts)) { c.Hosts = m; Save(c); }
+        }
     }
 
     void Save(LanLineConfig c)
