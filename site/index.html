@@ -120,6 +120,8 @@
     }
 
     .brand {
+      white-space: nowrap;
+      flex-shrink: 0;
       display: inline-flex;
       align-items: center;
       gap: 10px;
@@ -143,6 +145,7 @@
     }
 
     .nav-links a {
+      white-space: nowrap;
       color: var(--text-secondary);
       text-decoration: none;
       font-size: 14px;
@@ -159,6 +162,7 @@
     }
 
     .btn-ghost {
+      white-space: nowrap;
       display: inline-flex;
       align-items: center;
       gap: 7px;
@@ -1258,8 +1262,11 @@
       .platform-grid { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 900px) {
       .nav-links { display: none; }
+    }
+
+    @media (max-width: 640px) {
       .contrast-grid, .bento-grid { grid-template-columns: 1fr; }
       .hero { padding-top: 48px; }
     }
