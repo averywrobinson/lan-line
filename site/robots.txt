@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://lan-line.averywrobinson.com/sitemap.xml
+Sitemap: https://averywrobinson.com/lan-line/sitemap.xml

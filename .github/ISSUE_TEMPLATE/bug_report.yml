@@ -9,7 +9,17 @@ body:
     id: what
     attributes:
       label: What happened?
-      description: What you did, what you expected, and what happened instead.
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest way to make it happen again.
+      placeholder: |
+        1. On the Mac, paste a screenshot into Lan-Line
+        2. On the PC, ...
     validations:
       required: true
   - type: input
@@ -17,7 +27,7 @@ body:
     attributes:
       label: Lan-Line version
       description: Mac: Lan-Line → About Lan-Line. Windows: Settings → Apps → Lan-Line.
-      placeholder: 0.9.0-beta.1
+      placeholder: 0.9.0-beta.4
     validations:
       required: true
   - type: dropdown

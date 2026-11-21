@@ -1,0 +1,35 @@
+name: Beta feedback
+description: How Lan-Line is working for you — the good, the odd and the missing
+labels: ["beta-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for testing Lan-Line. Short answers are fine; skip anything that doesn't apply.
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Your setup
+      options:
+        - Mac ↔ Windows
+        - Mac ↔ Mac
+        - Windows ↔ Windows
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lan-Line version
+      placeholder: 0.9.0-beta.4
+  - type: textarea
+    id: good
+    attributes:
+      label: What worked well?
+  - type: textarea
+    id: odd
+    attributes:
+      label: What felt off or confusing?
+      description: Pairing, sending, the window, settings, install — anything.
+  - type: textarea
+    id: missing
+    attributes:
+      label: What would make you use it every day?

@@ -8,7 +8,7 @@
 A quiet, pinned window on your Mac and your Windows PC for moving files, pasted screenshots, links and text between them over your local network. No cloud, no accounts.</p>
 
 <p align="center">
-  <a href="https://lan-line.averywrobinson.com"><b>Website</b></a> ·
+  <a href="https://averywrobinson.com/lan-line/"><b>Website</b></a> ·
   <a href="https://github.com/averywrobinson/lan-line/releases"><b>Download</b></a> ·
   <a href="https://github.com/averywrobinson/lan-line/issues/new/choose"><b>Report an issue</b></a>
 </p>
