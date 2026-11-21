@@ -62,6 +62,9 @@ final class Link: @unchecked Sendable {
         Link(side: .client(host: host, port: port), fd: -1, peer: "\(host):\(port)", queue: queue, openedAt: openedAt)
     }
 
+    /// Hand the link's events to someone else (the Hub routes an accepted link to the right partner's Session).
+    func retarget(_ handler: @escaping @Sendable (LinkEvent) -> Void) { if !isClosed { self.handler = handler } }
+
     func start(_ handler: @escaping @Sendable (LinkEvent) -> Void) {
         self.handler = handler
         switch side {

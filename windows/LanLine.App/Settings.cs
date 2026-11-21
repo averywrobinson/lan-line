@@ -74,7 +74,8 @@ sealed partial class MainWindow
         var r = await Updates.FetchLatest(MyVersion);   // resumes on the UI thread
         if (r is { Kind: Updates.Outcome.Available, Found: { } a })
         {
-            if (_session != null) _session.NoteLatest(a); else ShowUpdate(a.Version.ToString(), a.Url);
+            _hub?.NoteLatest(a);   // tells every partner
+            ShowUpdate(a.Version.ToString(), a.Url);
             if (manual) ShowUpdate(a.Version.ToString(), a.Url);
         }
         else if (Updates.Message(r, manual) is { } m) Note(m, 6);
@@ -114,6 +115,7 @@ sealed partial class MainWindow
         if (_settingsPanel != null) _settingsPanel.Visibility = _showingSettings ? Visibility.Visible : Visibility.Collapsed;
         _pairPanel.Visibility = !_showingSettings && _pairing ? Visibility.Visible : Visibility.Collapsed;
         _body.Visibility = _composer.Visibility = !_showingSettings && !_pairing ? Visibility.Visible : Visibility.Collapsed;
+        RefreshStatus();   // "To: …" follows the composer; without this it stayed under the Settings footer
     }
 
     void LogReceived(string path, long size)
@@ -183,6 +185,7 @@ sealed partial class MainWindow
         _customGBBox = NumberBox(_customGB, "GB", "Storage limit in GB");
         _customGB.TextChanged += (_, _) => RefreshUsageBar();
         var col = new StackPanel { Margin = new Thickness(22, 16, 22, 16) };
+        col.Children.Add(_pairedBox);   // Paired computers (beta.7), filled when the panel opens
         var title = new TextBlock { Text = "Storage for received files", FontSize = 15, FontWeight = FontWeights.SemiBold };
         title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         _setFirstRun.Text = "Choose how Lan-Line keeps received files before you start. You can change this any time from the status line's menu.";
@@ -298,8 +301,64 @@ sealed partial class MainWindow
 
     static object? Selected(WrapPanel w) => w.Children.OfType<RadioButton>().FirstOrDefault(r => r.IsChecked == true)?.Tag;
 
+    readonly StackPanel _pairedBox = new() { Margin = new Thickness(0, 0, 0, 14) };
+
+    /// <summary>Settings → Paired computers: rename, forget (with a warning), pair another.</summary>
+    void RefreshPairedList()
+    {
+        _pairedBox.Children.Clear();
+        _pairedBox.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
+        var head = new TextBlock { Text = "Paired computers", FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) };
+        head.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        _pairedBox.Children.Add(head);
+        if (_partners.Count == 0)
+        {
+            var none = new TextBlock { Text = "None yet.", FontSize = 12 };
+            none.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            _pairedBox.Children.Add(none);
+        }
+        foreach (var p in _partners.ToList())
+        {
+            var id = p.Id;
+            var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+            var dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, p.Up ? "Green" : "IdleDot");
+            Automation(dot, p.Up ? "connected" : "not connected");
+            var name = new TextBox { Text = p.Name, FontSize = 12, MinWidth = 140, IsReadOnly = true, BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center };
+            name.SetResourceReference(ForegroundProperty, "Text");
+            Automation(name, $"Name of {p.Name}");
+            var rename = new Button { Content = "Rename", FontSize = 11, Margin = new Thickness(8, 0, 0, 0) };
+            var forget = new Button { Content = "Forget", FontSize = 11, Margin = new Thickness(8, 0, 0, 0) };
+            foreach (var b in new[] { rename, forget }) b.SetResourceReference(StyleProperty, "LinkButton");
+            forget.SetResourceReference(ForegroundProperty, "Danger");
+            rename.Click += (_, _) =>
+            {
+                if (name.IsReadOnly) { name.IsReadOnly = false; name.BorderThickness = new Thickness(1); name.Focus(); name.SelectAll(); rename.Content = "Done"; }
+                else { RenamePartner(id, name.Text); RefreshPairedList(); }
+            };
+            name.KeyDown += (_, k) => { if (k.Key == System.Windows.Input.Key.Enter && !name.IsReadOnly) { RenamePartner(id, name.Text); RefreshPairedList(); } };
+            forget.Click += (_, _) =>
+            {
+                var ok = MessageBox.Show(this, $"Forget {p.Name}? Lan-Line stops connecting to it and deletes its pairing secret. Files you already received stay.",
+                                         "Forget computer", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+                if (ok == MessageBoxResult.OK) { ForgetPartner(id); RefreshPairedList(); }
+            };
+            DockPanel.SetDock(dot, Dock.Left);
+            DockPanel.SetDock(forget, Dock.Right);
+            DockPanel.SetDock(rename, Dock.Right);
+            row.Children.Add(dot); row.Children.Add(forget); row.Children.Add(rename); row.Children.Add(name);
+            _pairedBox.Children.Add(row);
+        }
+        var another = new Button { Content = "Pair another computer…", FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0),
+                                   IsEnabled = _partners.Count < DeviceConfig.MaxPartners };
+        another.SetResourceReference(StyleProperty, "LinkButton");
+        another.Click += (_, _) => { CloseSettings(); BeginPairing(show: false); };
+        _pairedBox.Children.Add(another);
+    }
+
     void LoadSettingsIntoPanel()
     {
+        RefreshPairedList();
         var s = _storage;
         var retKnown = StorageSettings.RetentionChoices.Contains(s.RetentionDays);
         Select(_retPills, t => retKnown ? (t is int i && i == s.RetentionDays) : (t is int j && j == -1));

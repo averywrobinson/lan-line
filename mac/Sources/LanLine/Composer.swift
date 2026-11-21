@@ -10,10 +10,12 @@ struct Composer: View {
 
     var body: some View {
         let p = Palette.of(scheme)
+        VStack(alignment: .trailing, spacing: 3) {
+        if model.multi { TargetPicker(model: model).padding(.horizontal, 16) }
         HStack(alignment: .bottom, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 if model.draftEmpty {
-                    Text("Message \(model.peerLabel)")
+                    Text(model.multi ? "Message \(model.sendTarget == nil ? "everyone" : model.targetLabel)" : "Message \(model.peerLabel)")
                         .font(.system(size: 13))
                         .foregroundStyle(p.textSecondary.opacity(0.8))
                         .padding(.leading, 5).padding(.top, 2)
@@ -48,8 +50,32 @@ struct Composer: View {
                 .shadow(color: p.shadow.opacity(scheme == .dark ? 0.6 : 0.8), radius: 4, y: 1)
         )
         .padding(.horizontal, 12)
+        }
         .padding(.top, 6)
         .padding(.bottom, 12)
+    }
+}
+
+/// "To: Everyone ⌄": where Send goes. Only shown with 2+ paired computers; Everyone is the default.
+struct TargetPicker: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let p = Palette.of(scheme)
+        Menu {
+            Button { model.sendTarget = nil } label: { Label("Everyone", systemImage: model.sendTarget == nil ? "checkmark" : "person.3") }
+            Divider()
+            ForEach(model.partners) { partner in
+                Button { model.sendTarget = partner.id } label: {
+                    Label("\(partner.name)\(partner.up ? "" : " (not connected)")", systemImage: model.sendTarget == partner.id ? "checkmark" : "desktopcomputer")
+                }
+            }
+        } label: {
+            Text("To: \(model.targetLabel)").font(.system(size: 11, weight: .medium)).foregroundStyle(p.textSecondary)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help("Where Send goes: everyone, or one computer")
+        .accessibilityLabel("Send to \(model.targetLabel)")
     }
 }
 

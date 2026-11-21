@@ -166,6 +166,7 @@ final class HeadlessState: @unchecked Sendable {
         case .rekeyed: log("rekeyed", [:])
         case .peerAddresses(let a): log("peer_addresses", ["count": "\(a.count)"])
         case .updateAvailable(let v, let u): log("update_available", ["version": v, "url": u])
+        case .peerDevice(let d): log("peer_device", ["device": d])
         }
     }
 

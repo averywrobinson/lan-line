@@ -10,6 +10,17 @@ struct Row: Identifiable {
     var note: String?
     /// An update notice: the release page it links to (Lan-Line never downloads anything itself).
     var link: URL?
+    /// With 2+ partners: who sent it ("from STUDIO-PC") or where it went ("to Intel Mac", "to everyone").
+    var label: String?
+    /// Outgoing to several partners: how many have it so far.
+    var delivered = 0, total = 1
+}
+
+/// One paired computer as the window shows it.
+struct PartnerInfo: Identifiable, Equatable {
+    let id: String
+    var name: String
+    var up = false
 }
 
 /// Pairing screen state. `show` = this computer shows a code and waits; `enter` = it types the other's code.
@@ -52,38 +63,71 @@ final class AppModel: ObservableObject {
     @Published var pairBusy = false
     @Published var canCancelPairing = false
 
-    var session: Session?
+    var hub: Hub?
+    /// Paired computers, in pairing order.
+    @Published var partners: [PartnerInfo] = []
+    /// Where Send goes: nil = everyone, else a partner id.
+    @Published var sendTarget: String?
+    var multi: Bool { partners.count >= 2 }
+    func name(_ id: String) -> String { partners.first { $0.id == id }?.name ?? "partner" }
+    var targetLabel: String { sendTarget.map { name($0) } ?? "Everyone" }
+    /// One line per partner, for the status dot's tooltip.
+    var partnerStates: String { partners.map { "\($0.name): \($0.up ? "connected" : "not connected")" }.joined(separator: "\n") }
     var onPopUp: () -> Void = {}
     var onPin: (Bool) -> Void = { _ in }
     var pairActions = PairActions()
     var settingsActions = SettingsActions()
+    var partnerActions = PartnerActions()
     private let maxRows = 200
 
     var peerLabel: String { peer.isEmpty ? "your other computer" : peer }
     var statusLine: String {
         if pairing { return connected ? "Paired with \(peer)" : "Not paired yet" }
+        if connected, multi { return "Connected · \(partners.filter(\.up).count) of \(partners.count)" }
         return connected ? "Connected · \(peer.isEmpty ? "partner" : peer)" : status
     }
 
-    func handle(_ e: SessionEvent) {
-        let away = peer.isEmpty ? "partner" : peer
+    func handle(_ e: HubEvent) {
         switch e {
-        case .listening: status = "Waiting for \(away)…"
-        case .connected(let p): connected = true; peer = p
-        case .disconnected: connected = false; status = "Reconnecting…"
-        case .status(let s): if !connected { status = Self.statusLine(s, away: away) }
-        case .received(let item): upsert(item); onPopUp()
-        case .outgoing(let item): upsert(item)
-        case .receiveFailed(let name, let reason): note("Couldn't receive \(name): \(reason)"); onPopUp()
+        case .listening:
+            if !connected { status = partners.isEmpty ? "Not paired yet" : "Waiting for \(peerLabel)…" }
+        case .connected(let p, let n):
+            if let i = partners.firstIndex(where: { $0.id == p }) { partners[i].up = true; partners[i].name = n }
+            connected = true
+            if partners.count == 1 { peer = n }
+        case .disconnected(let p, _):
+            if let i = partners.firstIndex(where: { $0.id == p }) { partners[i].up = false }
+            connected = partners.contains { $0.up }
+            if !connected { status = "Reconnecting…" }
+        case .status(let p, let s):
+            if !connected { status = Self.statusLine(s, away: p.isEmpty ? "partner" : name(p)) }
+        case .received(let p, let item):
+            upsert(item, label: multi ? "from \(name(p))" : nil); onPopUp()
+        case .outgoing(let h):
+            upsertOutgoing(h)
+        case .receiveFailed(let p, let n, let r):
+            note("Couldn't receive \(n)\(multi ? " from \(name(p))" : ""): \(r)"); onPopUp()
         case .error(let msg): if !pairing { note(msg) }
-        case .rekeyed, .peerAddresses: break   // the controller saves these
+        case .rekeyed, .peerAddresses, .peerDevice: break   // the controller saves these
         case .updateAvailable(let v, let u): showUpdate(version: v, url: u)
         }
     }
 
-    func upsert(_ item: Item) {
+    /// The row for an outgoing item: one row for everyone, with "✓ n/m" until all have it.
+    func upsertOutgoing(_ h: HubItem) {
+        let item = Item(id: h.id, kind: h.kind, incoming: false, state: h.summary)
+        let label = multi ? (h.total > 1 ? "to everyone" : h.to.first.map { "to \(name($0))" }) : nil
+        if let i = rows.firstIndex(where: { $0.id == h.id }) {
+            rows[i].item = item; rows[i].delivered = h.delivered; rows[i].total = h.total
+            if rows[i].label == nil { rows[i].label = label }
+            return
+        }
+        append(Row(id: h.id, item: item, label: label, delivered: h.delivered, total: h.total))
+    }
+
+    func upsert(_ item: Item, label: String? = nil) {
         if let i = rows.firstIndex(where: { $0.id == item.id }) { rows[i].item = item; return }
-        append(Row(id: item.id, item: item))
+        append(Row(id: item.id, item: item, label: label))
     }
 
     /// Session diagnostics → the short line under the title. Version and pairing problems say what to do.
@@ -144,13 +188,13 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func sendText(_ text: String) -> Bool {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let s = session else { return false }
-        upsert(s.send(text: text))
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let h = hub, !partners.isEmpty else { return false }
+        upsertOutgoing(h.send(text: text, to: sendTarget))
         return true
     }
 
     func sendFiles(_ urls: [URL], fromDrop: Bool = false) {
-        guard let s = session else { note("Not connected yet: nothing was sent"); return }
+        guard let h = hub, !partners.isEmpty else { note("Not paired yet: nothing was sent"); return }
         guard !pairing else { return }
         for raw in urls {
             let u = (raw as NSURL).isFileReferenceURL() ? ((raw as NSURL).filePathURL ?? raw) : raw
@@ -168,12 +212,12 @@ final class AppModel: ObservableObject {
             if isDir.boolValue {
                 DebugLog.write("sending folder \(u.path)")
                 let skipped = Session.scanFolder(u).skipped
-                upsert(s.send(folder: u))
+                upsertOutgoing(h.send(folder: u, to: sendTarget))
                 if skipped > 0 { note("\(u.lastPathComponent): \(skipped) shortcut\(skipped == 1 ? "" : "s") (symlinks) left out", fadeAfter: 8) }
                 continue
             }
             DebugLog.write("sending \(u.path)")
-            upsert(s.send(file: u))
+            upsertOutgoing(h.send(file: u, to: sendTarget))
         }
     }
 
@@ -195,6 +239,14 @@ struct PairActions {
     var search: () -> Void = {}
     var connect: () -> Void = {}
     var cancel: () -> Void = {}
+}
+
+/// What the Paired computers list can ask the controller to do.
+@MainActor
+struct PartnerActions {
+    var rename: (String, String) -> Void = { _, _ in }
+    var forget: (String) -> Void = { _ in }
+    var pairAnother: () -> Void = {}
 }
 
 /// What the settings screen can ask the controller to do.

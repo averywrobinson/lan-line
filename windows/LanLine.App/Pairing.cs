@@ -12,9 +12,11 @@ sealed partial class MainWindow
 {
     string[] _args = [];
     bool _pairing, _showMode, _pairBusy, _searching;
-    LanLineConfig? _config;    // the saved pairing, if any
-    LanLineConfig? _pending;   // a pairing being tried, saved once it connects
-    DiscoveryResponder? _responder;
+    DeviceConfig _device = new();   // this computer's id and its paired computers
+    Hub? _hub;
+    Partner? _pendingPartner;       // a pairing being tried; added to the list once it connects
+    internal readonly List<PartnerInfo> _partners = [];
+    internal string? _sendTarget;   // null = everyone
     DispatcherTimer? _pairTimeout, _rediscover;
     string _code = "";
     List<DiscoveredPeer> _found = [];
@@ -32,121 +34,102 @@ sealed partial class MainWindow
     readonly TextBlock _pairErr = new() { FontSize = 12, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0), Visibility = Visibility.Collapsed };
     readonly Button _cancelLink = new() { Content = "Cancel" }, _switchLink = new();
 
-    int Port => int.TryParse(Arg(_args, "--port"), out var p) ? p : _config?.Port ?? 47830;
+    int Port => int.TryParse(Arg(_args, "--port"), out var p) ? p : _device.Port;
     string ConfigPath => Arg(_args, "--config") ?? LanLineConfig.DefaultPath;
     static string MyName => Environment.MachineName;
 
     void Boot()
     {
-        LanLineConfig? cfg = null;
-        try { cfg = LanLineConfig.Load(ConfigPath); } catch (Exception) { }
-        if (cfg != null || Arg(_args, "--connect") != null || _args.Contains("--listen"))
-            Run(cfg ?? new LanLineConfig());
-        else
-            BeginPairing(show: false);   // a PC types the code by default; it can switch
+        try { _device = DeviceConfig.Load(ConfigPath, "connect"); } catch (Exception) { _device = new DeviceConfig(); }
+        if (Arg(_args, "--connect") is { } host && _device.Peers.Count == 0)   // flags win (tests)
+            try { var legacy = LanLineConfig.Load(ConfigPath); _device.Peers.Add(new Partner { Id = "legacy", Name = legacy.Peer ?? host, Secret = legacy.Token, Role = "connect", Hosts = [host] }); } catch (Exception) { }
+        Save();
+        StartHub();
+        if (_device.Peers.Count == 0) BeginPairing(show: false);   // a PC types the code by default; it can switch
         SetUpStorage();
     }
 
-    /// <summary>Normal operation with a saved pairing.</summary>
-    void Run(LanLineConfig cfg)
+    /// <summary>One Hub for all partners: it listens for those that dial us, dials those we dial, answers discovery.</summary>
+    void StartHub()
     {
-        StopAll();
-        _config = cfg;
-        SetPairing(false);
-        _peer = cfg.Peer ?? "";
-        _statusText = "Starting…";
-        StartSession(cfg);
-        if (Listens(cfg)) TryRespond(cfg.Token);
-        else
+        var hc = new HubConfig
         {
-            // If the partner's address changes (DHCP), find it again by its pair id.
-            _rediscover = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
-            _rediscover.Tick += async (_, _) => await FindMovedPartner();
-            _rediscover.Start();
-        }
+            Name = MyName, DeviceId = _device.DeviceId, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, Port = Port,
+            AppVersion = MyVersion, LatestKnown = SavedLatest(), Advertise = [.. Discovery.LocalAddresses()],
+        };
+        // The one UI-thread hop: the Hub calls this on its own queue thread.
+        _hub = new Hub(hc, _device.Peers, e => Dispatcher.BeginInvoke(() => Handle(e)));
+        _partners.Clear();
+        _partners.AddRange(_device.Peers.Select(p => new PartnerInfo(p.Id, p.Name)));
+        _statusText = _device.Peers.Count == 0 ? "Not paired yet" : "Starting…";
+        _hub.Start();
+        _hub.StartResponder();
+        // Partners we dial that moved (DHCP) are found again by pair id or device id.
+        _rediscover = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
+        _rediscover.Tick += async (_, _) => { if (_hub != null) await _hub.FindMoved(); };
+        _rediscover.Start();
         RefreshStatus();
     }
 
-    bool Listens(LanLineConfig cfg) => _args.Contains("--listen") || (Arg(_args, "--connect") == null && cfg.Listens);
-
-    void StartSession(LanLineConfig cfg, bool pairing = false)
+    /// <summary>Hub events that change the saved pairings; the feed handles the rest.</summary>
+    void PartnerEvent(HubEvent e)
     {
-        Role role = Listens(cfg) ? new Role.Listen(Port) : new Role.Dial(Arg(_args, "--connect")?.Split(',') ?? cfg.Hosts, Port);
-        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, RekeyOnPair = pairing && Listens(cfg),
-            Advertise = Listens(cfg) && Arg(_args, "--connect") == null ? [.. Discovery.LocalAddresses()] : [],
-            AppVersion = MyVersion, LatestKnown = SavedLatest() };
-        // The one UI-thread hop: the Session calls this on its own queue thread.
-        _session = new Session(role, config, e => Dispatcher.BeginInvoke(() => Handle(e)));
-        _session.Start();
-    }
-
-    void TryRespond(string token)
-    {
-        try { _responder = new DiscoveryResponder(Port, MyName, PairCode.PairId(token)); }
-        catch (Exception) { if (_pairing) ShowPairError("Other computers can't find this one automatically; type its address there."); }
-    }
-
-    /// <summary>Called on every connect: keeps a new pairing, and remembers the partner's name.</summary>
-    void Paired(string name)
-    {
-        if (_pending is { } p)
+        switch (e)
         {
-            _pending = null;
-            _pairTimeout?.Stop();
-            p.Peer = name;
-            Save(p);
-            _config = p;
-            _pairBusy = false;
-            SetPairing(false);
-            if (p.Listens) { _responder?.Dispose(); _responder = null; TryRespond(p.Token); }   // advertise the new pair id
-        }
-        else if (_config is { } c && c.Peer != name)
-        {
-            c.Peer = name;
-            Save(c);
+            case HubEvent.Rekeyed rk:   // the pairing code was swapped for a long-term secret
+                if (_device.Partner(rk.Partner) is { } p) { _device.Add(p with { Secret = rk.Token }); Save(); }
+                else if (_pendingPartner?.Id == rk.Partner) _pendingPartner = _pendingPartner with { Secret = rk.Token };
+                break;
+            case HubEvent.PeerAddresses pa when _device.Partner(pa.Partner) is { Connects: true } q:   // fallbacks; a moved partner's new address first
+                var hosts = pa.Addrs.Length > 0 && (q.Hosts.Length == 0 || q.Hosts[0] != pa.Addrs[0])
+                    ? pa.Addrs.Concat(q.Hosts) : q.Hosts.Concat(pa.Addrs);
+                _device.Add(q with { Hosts = [.. hosts.Distinct(StringComparer.OrdinalIgnoreCase).Take(6)] }); Save();
+                break;
+            case HubEvent.PeerDevice pd when pd.Partner != pd.Device: AdoptDeviceId(pd.Partner, pd.Device); break;
+            case HubEvent.Connected c:
+                if (_pendingPartner?.Id == c.Partner) FinishPairing(c.Name);
+                else if (_device.Partner(c.Partner) is { } k && k.Name != c.Name) { _device.Add(k with { Name = c.Name }); Save(); }
+                break;
         }
     }
 
-    /// <summary>The pairing code was swapped for a long-term secret: keep it (saved with the pairing, or now).</summary>
-    void Rekeyed(string token)
+    /// <summary>A partner told us its device id: use it as the partner's id. If we already had a partner with that id (paired again), the new pairing replaces it.</summary>
+    void AdoptDeviceId(string old, string dev)
     {
-        if (_pending is { } p) p.Token = token;
-        else if (_config is { } c) { c.Token = token; Save(c); }
-    }
-
-    /// <summary>The partner's other addresses become fallback hosts (the typed or working one stays first).</summary>
-    void PeerAddresses(string[] addrs)
-    {
-        string[] Merged(string[] h) => h.Concat(addrs).Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToArray();
-        if (_pending is { } p && !p.Listens) p.Hosts = Merged(p.Hosts);
-        else if (_config is { } c && !Listens(c))
+        if (_pendingPartner?.Id == old) _pendingPartner = _pendingPartner with { Id = dev };
+        if (_device.Partner(dev) is { } dup && _device.Partner(old) != null)
         {
-            var m = Merged(c.Hosts);
-            if (!m.SequenceEqual(c.Hosts)) { c.Hosts = m; Save(c); }
+            _device.Forget(dup.Id); _hub?.Remove(dup.Id); _partners.RemoveAll(x => x.Id == dup.Id);
         }
+        if (_device.Partner(old) is { } p) { _device.Forget(old); _device.Add(p with { Id = dev }); Save(); }
+        var i = _partners.FindIndex(x => x.Id == old);
+        if (i >= 0) _partners[i] = _partners[i] with { Id = dev };
+        if (_sendTarget == old) _sendTarget = dev;
+        _hub?.Rename(old, dev);
     }
 
-    void Save(LanLineConfig c)
+    void Save()
     {
-        try { c.Save(ConfigPath); } catch (Exception e) { Note($"Couldn't save the pairing: {e.Message}"); }
+        try { _device.Save(ConfigPath); } catch (Exception e) { Note($"Couldn't save the pairing: {e.Message}"); }
     }
 
     void StopAll()
     {
-        _session?.Dispose(); _session = null;
-        _responder?.Dispose(); _responder = null;
+        _hub?.Dispose(); _hub = null;
         _pairTimeout?.Stop(); _pairTimeout = null;
         _rediscover?.Stop(); _rediscover = null;
         _connected = false;
     }
 
+    // ---------- pairing adds a partner; the others stay connected
+
     void BeginPairing(bool show)
     {
-        StopAll();
-        _pending = null;
+        if (_pendingPartner is { } old) _hub?.Remove(old.Id);
+        _pendingPartner = null;
+        _pairTimeout?.Stop();
         _showMode = show;
         _pairBusy = false;
-        _peer = "";
         HidePairError();
         SetPairing(true);
         if (Height < 440)   // the pairing screen needs a little more room than the feed
@@ -155,16 +138,63 @@ sealed partial class MainWindow
             Height = 440;
             Top = Math.Max(SystemParameters.WorkArea.Top + 8, Top - grow);
         }
+        if (_device.Peers.Count >= DeviceConfig.MaxPartners)
+        {
+            ShowPairError($"Lan-Line pairs with up to {DeviceConfig.MaxPartners} computers. Forget one in Settings first.");
+            RefreshPairPanel();
+            return;
+        }
         if (show)
         {
             _code = PairCode.Generate();
-            var cfg = new LanLineConfig { Port = Port, Token = _code, Role = "listen" };
-            _pending = cfg;
-            StartSession(cfg, pairing: true);
-            TryRespond(_code);
+            _pendingPartner = new Partner { Id = "pairing-" + Guid.NewGuid().ToString("N")[..8], Name = "New computer", Secret = _code, Role = "listen" };
+            _hub?.Add(_pendingPartner, pairing: true);   // the hub's responder now also answers for this code
         }
         else _ = Search();
         RefreshPairPanel();
+    }
+
+    void CancelPairing()
+    {
+        if (_pendingPartner is { } p) _hub?.Remove(p.Id);
+        _pendingPartner = null;
+        _pairTimeout?.Stop();
+        _pairBusy = false;
+        SetPairing(false);
+    }
+
+    void FinishPairing(string name)
+    {
+        if (_pendingPartner is not { } p) return;
+        _pendingPartner = null;
+        _pairTimeout?.Stop();
+        try { _device.Add(p with { Name = name }); } catch (TooManyPartnersException) { Note($"Lan-Line pairs with up to {DeviceConfig.MaxPartners} computers."); }
+        Save();
+        if (!_partners.Any(x => x.Id == p.Id)) _partners.Add(new PartnerInfo(p.Id, name, true));
+        _pairBusy = false;
+        SetPairing(false);
+        if (Multi) Note($"Paired with {name}. Send goes to everyone; pick one computer above the message box.", 10);
+    }
+
+    internal void RenamePartner(string id, string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0) return;
+        _device.Rename(id, name); Save();
+        var i = _partners.FindIndex(x => x.Id == id);
+        if (i >= 0) _partners[i] = _partners[i] with { Name = name.Length > 64 ? name[..64] : name };
+        RefreshStatus();
+    }
+
+    internal void ForgetPartner(string id)
+    {
+        _device.Forget(id); Save();
+        _hub?.Remove(id);
+        _partners.RemoveAll(x => x.Id == id);
+        if (_sendTarget == id) _sendTarget = null;
+        _connected = _partners.Any(x => x.Up);
+        if (_device.Peers.Count == 0) _statusText = "Not paired yet";
+        RefreshStatus();
     }
 
     async Task Search()
@@ -181,19 +211,18 @@ sealed partial class MainWindow
         var host = _addrBox.Text.Trim();
         if (host.Length == 0) { ShowPairError("Pick a computer above or type its address."); return; }
         if (PairCode.Normalize(_codeBox.Text) is not { } code) { ShowPairError("The code is 10 letters and numbers, like 7QK4M-2XH9C."); return; }
-        StopAll();
         HidePairError();
         _pairBusy = true;
-        var cfg = new LanLineConfig { Port = Port, Token = code, Hosts = [host], Role = "connect" };
-        _pending = cfg;
-        StartSession(cfg);
+        var p = new Partner { Id = "pairing-" + Guid.NewGuid().ToString("N")[..8], Name = host, Secret = code, Role = "connect", Hosts = [host] };
+        _pendingPartner = p;
+        _hub?.Add(p, pairing: false);
         _pairTimeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
         _pairTimeout.Tick += (_, _) =>
         {
             _pairTimeout?.Stop();
-            if (_pending == null) return;
-            StopAll();
-            _pending = null;
+            if (_pendingPartner?.Id != p.Id) return;
+            _hub?.Remove(p.Id);
+            _pendingPartner = null;
             _pairBusy = false;
             ShowPairError($"Couldn't pair. Check the code, and that Lan-Line is open on {host}.");
             RefreshPairPanel();
@@ -202,22 +231,11 @@ sealed partial class MainWindow
         RefreshPairPanel();
     }
 
-    async Task FindMovedPartner()
-    {
-        if (_config is not { } c || Listens(c) || _connected || _pairing) return;
-        var want = PairCode.PairId(c.Token);
-        var peers = await Discovery.SearchAsync(c.Port);
-        if (peers.FirstOrDefault(x => x.PairId == want) is not { } p || c.Hosts.Contains(p.Host) || _config != c || _connected) return;
-        c.Hosts = [p.Host, .. c.Hosts.Take(3)];
-        Save(c);
-        Run(c);
-    }
-
     void SetPairing(bool on)
     {
         _pairing = on;
         ApplyScreen();
-        _cancelLink.Visibility = on && _config != null ? Visibility.Visible : Visibility.Collapsed;
+        _cancelLink.Visibility = on && _device.Peers.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         RefreshStatus();
         if (!on) _input.Focus();
     }
@@ -316,7 +334,7 @@ sealed partial class MainWindow
 
         var links = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) };
         foreach (var l in new[] { _cancelLink, _switchLink }) { l.SetResourceReference(StyleProperty, "LinkButton"); links.Children.Add(l); }
-        _cancelLink.Click += (_, _) => { if (_config is { } c) Run(c); };
+        _cancelLink.Click += (_, _) => CancelPairing();
         _switchLink.Click += (_, _) => BeginPairing(!_showMode);
         col.Children.Add(links);
 

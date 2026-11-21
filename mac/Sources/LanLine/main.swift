@@ -48,6 +48,9 @@ if options.flag("--check-updates") {
     done.wait()
     exit(0)
 }
+if options.flag("--hub"), options.flag("--headless") || options.flag("--selftest") {
+    HubHeadless.run(options)   // never returns
+}
 if options.flag("--headless") || options.flag("--selftest") {
     Headless.run(options)   // never returns
 }

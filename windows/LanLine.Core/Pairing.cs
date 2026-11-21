@@ -45,7 +45,8 @@ public static class PairCode
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("lan-line-pair:" + token)))[..8];
 }
 
-public sealed record DiscoveredPeer(string Name, string Host, int Port, string PairId);
+/// <param name="Device">beta.7+: the answering computer's device id.</param>
+public sealed record DiscoveredPeer(string Name, string Host, int Port, string PairId, string? Device = null);
 
 /// <summary>
 /// UDP discovery on the Lan-Line port: a waiting computer answers "LANLINE?1" with its name, TCP port and pair id.
@@ -55,8 +56,12 @@ public static class Discovery
 {
     public const string Probe = "LANLINE?1";
 
-    public static byte[] Reply(string name, int port, string pairId) =>
-        Encoding.UTF8.GetBytes(new JsonObject { ["lanline"] = 1, ["name"] = name.Length > 64 ? name[..64] : name, ["pair"] = pairId, ["port"] = port }.ToJsonString());
+    public static byte[] Reply(string name, int port, string pairId, string? device = null)
+    {
+        var o = new JsonObject { ["lanline"] = 1, ["name"] = name.Length > 64 ? name[..64] : name, ["pair"] = pairId, ["port"] = port };
+        if (device != null) o["device"] = device;
+        return Encoding.UTF8.GetBytes(o.ToJsonString());
+    }
 
     public static DiscoveredPeer? Parse(byte[] data, string host)
     {
@@ -67,7 +72,9 @@ public static class Discovery
             if (o == null || (int?)o["lanline"] != 1) return null;
             var name = (string?)o["name"]; var port = (int?)o["port"]; var pair = (string?)o["pair"];
             if (name == null || pair == null || port is not (>= 1 and <= 65535)) return null;
-            return new DiscoveredPeer(name.Length > 64 ? name[..64] : name, host, port.Value, pair.Length > 16 ? pair[..16] : pair);
+            var dev = (string?)o["device"];
+            return new DiscoveredPeer(name.Length > 64 ? name[..64] : name, host, port.Value, pair.Length > 16 ? pair[..16] : pair,
+                                      dev != null && Session.IsDeviceId(dev) ? dev : null);
         }
         catch (Exception) { return null; }
     }
@@ -149,13 +156,15 @@ public sealed class DiscoveryResponder : IDisposable
     readonly UdpClient _udp;
     readonly CancellationTokenSource _cts = new();
 
-    public DiscoveryResponder(int port, string name, string pairId)
+    public DiscoveryResponder(int port, string name, string pairId) : this(port, name, null, () => [pairId]) { }
+
+    /// <summary>Several partners (beta.7): one reply per pair id, so a beta.6 partner still finds the one it knows.</summary>
+    public DiscoveryResponder(int port, string name, string? device, Func<string[]> pairIds)
     {
         _udp = new UdpClient();
         _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
         Discovery.IgnoreConnReset(_udp);
-        var answer = Discovery.Reply(name, port, pairId);
         _ = Task.Run(async () =>
         {
             while (!_cts.IsCancellationRequested)
@@ -163,7 +172,9 @@ public sealed class DiscoveryResponder : IDisposable
                 try
                 {
                     var r = await _udp.ReceiveAsync(_cts.Token);
-                    if (Encoding.ASCII.GetString(r.Buffer) == Discovery.Probe) await _udp.SendAsync(answer, r.RemoteEndPoint);
+                    if (Encoding.ASCII.GetString(r.Buffer) != Discovery.Probe) continue;
+                    foreach (var pid in pairIds().Take(DeviceConfig.MaxPartners + 1))
+                        await _udp.SendAsync(Discovery.Reply(name, port, pid, device), r.RemoteEndPoint);
                 }
                 catch (OperationCanceledException) { return; }
                 catch (ObjectDisposedException) { return; }

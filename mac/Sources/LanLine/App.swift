@@ -22,6 +22,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildPanel()
         if let m = options.value("--demo-settings") { Demo.settings(model, firstRun: m == "first") }
         else if let m = options.value("--demo-pair") { Demo.pair(model, mode: m) }
+        else if options.flag("--demo-multi") { Demo.multi(model) }
         else if options.flag("--demo") { Demo.fill(model, empty: options.flag("--empty")) } else { boot() }
         if let out = options.value("--snapshot") { snapshot(to: out) }
     }
@@ -51,13 +52,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: session and pairing
 
-    private var config: LanLineConfig?          // the saved pairing, if any
-    private var pending: LanLineConfig?         // a pairing being tried, saved once it connects
-    private var responder: DiscoveryResponder?
     private var pairTimeout: DispatchWorkItem?
     private var rediscover: Timer?
 
-    private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? config?.port ?? LanLineConfig.defaultPort }
+    private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? device.port }
 
     // MARK: storage (received-file cleanup)
 
@@ -109,7 +107,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let r = await Updates.fetchLatest(current: current)
             guard let self else { return }
             if case .available(let a) = r {
-                if let session = self.model.session { session.noteLatest(a) } else { self.model.showUpdate(version: a.version.description, url: a.url) }
+                self.model.hub?.noteLatest(a)   // shows it here and tells the partners
+                self.model.showUpdate(version: a.version.description, url: a.url)
                 if manual { self.model.showUpdate(version: a.version.description, url: a.url) }
             } else if let m = Updates.message(r, manual: manual) {
                 self.model.note(m, fadeAfter: 6)
@@ -225,67 +224,76 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switchMode: { [weak self] m in self?.beginPairing(m) },
             search: { [weak self] in self?.search() },
             connect: { [weak self] in self?.tryConnect() },
-            cancel: { [weak self] in if let c = self?.config { self?.run(c) } })
-        if let c = try? LanLineConfig.load(from: options.configURL) { run(c) }
-        else if options.value("--connect") != nil { run(options.loadConfig()) }   // flags win; loadConfig explains a bad path
-        else { beginPairing(.show) }
+            cancel: { [weak self] in self?.cancelPairing() })
+        model.partnerActions = PartnerActions(
+            rename: { [weak self] id, name in self?.renamePartner(id, name) },
+            forget: { [weak self] id in self?.forgetPartner(id) },
+            pairAnother: { [weak self] in self?.model.showingSettings = false; self?.restoreAfterSettings(); self?.beginPairing(.show) })
+        device = (try? DeviceConfig.load(from: options.configURL, defaultRole: "listen")) ?? DeviceConfig()
+        if let host = options.value("--connect"), device.peers.isEmpty, let legacy = try? LanLineConfig.load(from: options.configURL) {
+            device.peers = [Partner(id: "legacy", name: legacy.peer ?? host, secret: legacy.token, role: "connect", hosts: [host])]   // flags win
+        }
+        save()
+        startHub()
+        if device.peers.isEmpty { beginPairing(.show) }
         setUpStorage()
     }
 
-    /// Normal operation with a saved pairing.
-    private func run(_ cfg: LanLineConfig) {
-        stopAll()
-        config = cfg
-        model.pairing = false
-        model.peer = cfg.peer ?? ""
-        model.status = "Starting…"
-        startSession(cfg)
-        if !cfg.connects {
-            responder = try? DiscoveryResponder(port: cfg.port, name: options.name, pairID: PairCode.pairID(token: cfg.token), queue: .main)
-        } else {
-            // If the partner's address changes (DHCP), find it again by its pair id.
-            let t = Timer(timeInterval: 20, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.findMovedPartner() } }
-            RunLoop.main.add(t, forMode: .common)
-            rediscover = t
-        }
-    }
+    private var device = DeviceConfig()
 
-    private func startSession(_ cfg: LanLineConfig, pairing: Bool = false) {
-        var sc = SessionConfig(token: cfg.token, name: options.name,
-                               downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir)
-        sc.rekeyOnPair = pairing && !cfg.connects
-        sc.appVersion = options.value("--app-version") ?? AppInfo.version
-        sc.latestKnown = savedLatest()
-        if !cfg.connects && options.value("--connect") == nil { sc.advertise = Discovery.localAddresses() }
-        // The one main-thread hop: the Session calls this on its own queue.
-        let s = Session(role: options.role(cfg), config: sc) { [weak self] event in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(event) } }
+    private var downloadsDir: URL { options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir }
+
+    /// One Hub for all partners: it listens for those that dial us, dials those we dial, and answers discovery.
+    private func startHub() {
+        var hc = HubConfig(name: options.name, deviceID: device.deviceID, downloadDir: downloadsDir)
+        hc.port = port
+        hc.appVersion = options.value("--app-version") ?? AppInfo.version
+        hc.latestKnown = savedLatest()
+        hc.advertise = Discovery.localAddresses()
+        // The one main-thread hop: the Hub calls this on its own queue.
+        let h = Hub(config: hc, partners: device.peers) { [weak self] e in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(e) } }
         }
-        model.session = s
-        s.start()
+        model.hub = h
+        model.partners = device.peers.map { PartnerInfo(id: $0.id, name: $0.name) }
+        model.status = device.peers.isEmpty ? "Not paired yet" : "Starting…"
+        h.start()
+        h.startResponder()
+        // Partners we dial that moved (DHCP) are found again by pair id or device id.
+        let t = Timer(timeInterval: 20, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.model.hub?.findMoved() } }
+        RunLoop.main.add(t, forMode: .common)
+        rediscover = t
     }
 
     private var debugPasteDone = false
 
-    private func event(_ e: SessionEvent) {
-        if case .received(let item) = e {   // a received folder is kept (and cleaned up) as one entry
+    private func event(_ e: HubEvent) {
+        if case .received(_, let item) = e {   // a received folder is kept (and cleaned up) as one entry
             switch item.kind {
             case .file(_, let size, let url), .folder(_, _, let size, let url): logReceived(url, size: size)
             case .text: break
             }
         }
-        if case .rekeyed(let t) = e {   // the pairing code was swapped for a long-term secret
-            if var p = pending { p.token = t; pending = p }
-            else if var c = config { c.token = t; save(c); config = c }
-        }
-        if case .updateAvailable(let v, let u) = e, model.storage.latestVersion != v {   // remember it across launches
+        switch e {
+        case .rekeyed(let p, let t):   // the pairing code was swapped for a long-term secret
+            if let i = device.peers.firstIndex(where: { $0.id == p }) { device.peers[i].secret = t; save() }
+            else if var q = pendingPartner, q.id == p { q.secret = t; pendingPartner = q }
+        case .peerAddresses(let p, let a):   // the partner's other addresses become fallback hosts
+            if let i = device.peers.firstIndex(where: { $0.id == p }), device.peers[i].connects {
+                var out: [String] = []
+                for x in device.peers[i].hosts + a where !out.contains(x) { out.append(x) }
+                if a.first.map({ device.peers[i].hosts.first != $0 }) ?? false { out = [a[0]] + out.filter { $0 != a[0] } }
+                device.peers[i].hosts = Array(out.prefix(6)); save()
+            }
+        case .peerDevice(let p, let d):   // key the partner by its real device id (pairing again replaces, not duplicates)
+            if p != d { adoptDeviceID(p, d) }
+        case .updateAvailable(let v, let u) where model.storage.latestVersion != v:   // remember it across launches
             var s = model.storage; s.latestVersion = v; s.latestURL = u; model.storage = s
             try? s.save(to: settingsURL)
-        }
-        if case .peerAddresses(let a) = e {   // the partner's other addresses become fallback hosts
-            func merged(_ h: [String]?) -> [String] { var out: [String] = []; for x in (h ?? []) + a where !out.contains(x) { out.append(x) }; return Array(out.prefix(6)) }
-            if var p = pending, p.connects { p.hosts = merged(p.hosts); pending = p }
-            else if var c = config, c.connects, merged(c.hosts) != (c.hosts ?? []) { c.hosts = merged(c.hosts); save(c); config = c }
+        case .connected(let p, let name):
+            if let q = pendingPartner, q.id == p { finishPairing(name) }
+            else if let i = device.peers.firstIndex(where: { $0.id == p }), device.peers[i].name != name { device.peers[i].name = name; save() }
+        default: break
         }
         model.handle(e)
         // --debug-paste PATH: once connected, put PATH on the clipboard the way Finder's Copy does and run Paste.
@@ -304,61 +312,84 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
         }
-        guard case .connected(let name) = e else { return }
-        if var p = pending {          // a pairing just worked: keep it
-            pending = nil
-            pairTimeout?.cancel()
-            p.peer = name
-            save(p)
-            config = p
-            model.pairing = false
-            model.pairBusy = false
-            if !p.connects {   // advertise the pair id of the new long-term secret
-                responder?.close()
-                responder = try? DiscoveryResponder(port: p.port, name: options.name, pairID: PairCode.pairID(token: p.token), queue: .main)
-            }
-        } else if var c = config, c.peer != name {
-            c.peer = name
-            save(c)
-            config = c
-        }
     }
 
-    private func save(_ c: LanLineConfig) {
-        do { try c.save(to: options.configURL) } catch { model.note("Couldn't save the pairing: \(error.localizedDescription)") }
+    /// A partner told us its device id: use it as the partner's id from now on. If we already had a partner with
+    /// that id (paired again), the new pairing replaces it.
+    private func adoptDeviceID(_ old: String, _ new: String) {
+        if pendingPartner?.id == old { pendingPartner?.id = new }
+        if let dup = device.peers.firstIndex(where: { $0.id == new }), device.peers.contains(where: { $0.id == old }) {
+            let gone = device.peers.remove(at: dup)
+            model.hub?.remove(gone.id)
+            model.partners.removeAll { $0.id == gone.id }
+        }
+        if let i = device.peers.firstIndex(where: { $0.id == old }) { device.peers[i].id = new; save() }
+        if let i = model.partners.firstIndex(where: { $0.id == old }) { model.partners[i] = PartnerInfo(id: new, name: model.partners[i].name, up: model.partners[i].up) }
+        if model.sendTarget == old { model.sendTarget = new }
+        model.hub?.rename(partner: old, to: new)
+    }
+
+    private func save() {
+        do { try device.save(to: options.configURL) } catch { model.note("Couldn't save the pairing: \(error.localizedDescription)") }
     }
 
     private func stopAll() {
-        model.session?.stop(); model.session = nil
-        responder?.close(); responder = nil
+        model.hub?.stop(); model.hub = nil
         pairTimeout?.cancel(); pairTimeout = nil
         rediscover?.invalidate(); rediscover = nil
         model.connected = false
     }
 
+    // MARK: pairing adds a partner; the others stay connected
+
+    private var pendingPartner: Partner?
+
     private func beginPairing(_ mode: PairMode) {
-        stopAll()
-        pending = nil
+        if let q = pendingPartner { model.hub?.remove(q.id); model.partners.removeAll { $0.id == q.id } }
+        pendingPartner = nil
+        pairTimeout?.cancel()
         model.pairing = true
         model.pairMode = mode
         model.pairError = nil
         model.pairBusy = false
-        model.canCancelPairing = config != nil
-        model.peer = ""
+        model.canCancelPairing = !device.peers.isEmpty
         growPanel(to: 430)   // the pairing screen needs a little more room than the feed
+        guard device.peers.count < DeviceConfig.maxPartners else {
+            model.pairError = "Lan-Line pairs with up to \(DeviceConfig.maxPartners) computers. Forget one in Settings first."
+            return
+        }
         switch mode {
         case .show:
             let code = PairCode.generate()
             model.pairCode = code
             model.myAddresses = Discovery.localAddresses()
-            let cfg = LanLineConfig(port: port, token: code, role: "listen")
-            pending = cfg
-            startSession(cfg, pairing: true)
-            do { responder = try DiscoveryResponder(port: port, name: options.name, pairID: PairCode.pairID(token: code), queue: .main) }
-            catch { model.pairError = "Other computers can't find this one automatically; type its address there." }
+            let p = Partner(id: "pairing-" + UUID().uuidString.prefix(8), name: "New computer", secret: code, role: "listen", hosts: [])
+            pendingPartner = p
+            model.hub?.add(p, pairing: true)   // the hub's responder now also answers for this code
         case .enter:
             search()
         }
+    }
+
+    private func cancelPairing() {
+        if let q = pendingPartner { model.hub?.remove(q.id) }
+        pendingPartner = nil
+        pairTimeout?.cancel()
+        model.pairing = false
+        model.pairBusy = false
+    }
+
+    private func finishPairing(_ name: String) {
+        guard var p = pendingPartner else { return }
+        pendingPartner = nil
+        pairTimeout?.cancel()
+        p.name = name
+        do { try device.add(p) } catch { model.note("Lan-Line pairs with up to \(DeviceConfig.maxPartners) computers.") }
+        save()
+        if !model.partners.contains(where: { $0.id == p.id }) { model.partners.append(PartnerInfo(id: p.id, name: name, up: true)) }
+        model.pairing = false
+        model.pairBusy = false
+        if model.multi { model.note("Paired with \(name). Send goes to everyone; pick one computer next to Send.", fadeAfter: 10) }
     }
 
     private func search() {
@@ -379,17 +410,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let code = PairCode.normalize(model.typedCode) else {
             model.pairError = "The code is 10 letters and numbers, like 7QK4M-2XH9C."; return
         }
-        stopAll()
         model.pairError = nil
         model.pairBusy = true
-        let cfg = LanLineConfig(port: port, token: code, hosts: [host], role: "connect")
-        pending = cfg
-        startSession(cfg)
+        let p = Partner(id: "pairing-" + UUID().uuidString.prefix(8), name: host, secret: code, role: "connect", hosts: [host])
+        pendingPartner = p
+        model.hub?.add(p, pairing: false)
         let t = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.pending != nil else { return }
-                self.stopAll()
-                self.pending = nil
+                guard let self, let q = self.pendingPartner, q.id == p.id else { return }
+                self.model.hub?.remove(q.id)
+                self.pendingPartner = nil
                 self.model.pairBusy = false
                 self.model.pairError = "Couldn't pair. Check the code, and that Lan-Line is open on \(host)."
             }
@@ -398,18 +428,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: t)
     }
 
-    private func findMovedPartner() {
-        guard let c = config, c.connects, !model.connected, !model.pairing else { return }
-        let want = PairCode.pairID(token: c.token)
-        Discovery.search(port: c.port, queue: .main) { [weak self] peers in
-            MainActor.assumeIsolated {
-                guard let self, let p = peers.first(where: { $0.pairID == want }), !(c.hosts ?? []).contains(p.host) else { return }
-                var n = c
-                n.hosts = Array(([p.host] + (c.hosts ?? [])).prefix(4))
-                self.save(n)
-                self.run(n)
-            }
-        }
+    private func renamePartner(_ id: String, _ name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        device.rename(id, to: n); save()
+        if let i = model.partners.firstIndex(where: { $0.id == id }) { model.partners[i].name = String(n.prefix(64)) }
+    }
+
+    private func forgetPartner(_ id: String) {
+        device.forget(id); save()
+        model.hub?.remove(id)
+        model.partners.removeAll { $0.id == id }
+        if model.sendTarget == id { model.sendTarget = nil }
+        model.connected = model.partners.contains { $0.up }
+        if device.peers.isEmpty { model.status = "Not paired yet" }
     }
 
     static func findInput(in v: NSView) -> InputTextView? {

@@ -34,6 +34,7 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 - **Copy and delivery checks.** Every message and file has a copy button and a ✓ once the other computer has it.
 - **Wakes on receive.** Minimize it; it pops back up when something arrives.
 - **Direct and local.** Machine to machine over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
+- **Several computers.** Pair up to 8 Macs and PCs. Send goes to everyone by default, or pick one computer next to Send; each message says who it came from or went to, with "✓ 2/3" until all have it. Settings → Paired computers lets you rename or forget one.
 - **Whole folders.** Drop a folder and it arrives as one item, subfolders and empty folders included, shown as one chip with its file count and size. Shortcuts (symlinks) are left out.
 - **Too big? Said up front.** If the other computer doesn't have room, both windows say so straight away, before anything is sent.
 - **Encrypted end to end.** Everything between the two computers is encrypted (AES-256-GCM), with fresh keys for every connection. The pairing code and the long-term secret are never sent in the clear.
@@ -57,8 +58,8 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.6-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
-| **Windows** | `Lan-Line-0.9.0-beta.6-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.7-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
+| **Windows** | `Lan-Line-0.9.0-beta.7-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew:
 
@@ -99,7 +100,7 @@ Since 0.9.0-beta.5, all traffic between the two computers is encrypted. The pair
 
 Limits: someone on your network can still see how much is sent and when, and encryption can't protect a computer that is already compromised. Full design and threat model: [ENCRYPTION.md](ENCRYPTION.md).
 
-**Updating from beta.4:** update both computers. beta.5 and later can't talk to beta.4 (there is no unencrypted fallback); until both are updated, the window says "Update Lan-Line on …". beta.5 and beta.6 work together, but sending folders needs beta.6 on both. Your pairing carries over.
+**Updating from beta.4:** update both computers. beta.5 and later can't talk to beta.4 (there is no unencrypted fallback); until both are updated, the window says "Update Lan-Line on …". beta.5, beta.6 and beta.7 work together; folders need beta.6 or later on both ends, and pairing more than two computers needs beta.7 on the computers with several partners. Your pairing carries over.
 
 ## How it works
 

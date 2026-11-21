@@ -27,6 +27,7 @@ public static class Headless
     public static int Run(string[] args)
     {
         if (args.Contains("--discover") || args.Contains("--respond")) return Discover(args);
+        if (args.Contains("--hub")) return HubHeadless.Run(args);
         if (args.Contains("--check-updates"))   // run the update check once, print the outcome
         {
             var u = Val(args, "--check-updates") is { } x && x.StartsWith("http") ? x : Updates.VersionUrl;

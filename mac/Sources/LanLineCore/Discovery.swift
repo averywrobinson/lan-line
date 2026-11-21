@@ -7,8 +7,11 @@ public struct DiscoveredPeer: Sendable, Equatable, Hashable {
     public let host: String
     public let port: UInt16
     public let pairID: String
+    /// beta.7+: the answering computer's device id.
+    public var device: String? = nil
 
-    public init(name: String, host: String, port: UInt16, pairID: String) {
+    public init(name: String, host: String, port: UInt16, pairID: String, device: String? = nil) {
+        self.device = device
         self.name = name; self.host = host; self.port = port; self.pairID = pairID
     }
 }
@@ -18,8 +21,9 @@ public struct DiscoveredPeer: Sendable, Equatable, Hashable {
 public enum Discovery {
     public static let probe = "LANLINE?1"
 
-    public static func reply(name: String, port: UInt16, pairID: String) -> Data {
-        let obj: [String: Any] = ["lanline": 1, "name": String(name.prefix(64)), "port": Int(port), "pair": pairID]
+    public static func reply(name: String, port: UInt16, pairID: String, device: String? = nil) -> Data {
+        var obj: [String: Any] = ["lanline": 1, "name": String(name.prefix(64)), "port": Int(port), "pair": pairID]
+        if let device { obj["device"] = device }
         return (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data()
     }
 
@@ -29,7 +33,8 @@ public enum Discovery {
               (o["lanline"] as? Int) == 1,
               let name = o["name"] as? String, let port = o["port"] as? Int, (1...65535).contains(port),
               let pair = o["pair"] as? String else { return nil }
-        return DiscoveredPeer(name: String(name.prefix(64)), host: host, port: UInt16(port), pairID: String(pair.prefix(16)))
+        let dev = (o["device"] as? String).flatMap { Session.isDeviceID($0) ? $0 : nil }
+        return DiscoveredPeer(name: String(name.prefix(64)), host: host, port: UInt16(port), pairID: String(pair.prefix(16)), device: dev)
     }
 
     /// This computer's IPv4 addresses worth showing (up, not loopback, not link-local), LAN ones first.
@@ -112,7 +117,13 @@ public enum Discovery {
 public final class DiscoveryResponder: @unchecked Sendable {
     private var source: DispatchSourceRead?
 
-    public init(port: UInt16 = LanLineConfig.defaultPort, name: String, pairID: String, queue: DispatchQueue) throws {
+    public convenience init(port: UInt16 = LanLineConfig.defaultPort, name: String, pairID: String, queue: DispatchQueue) throws {
+        try self.init(port: port, name: name, device: nil, pairIDs: { [pairID] }, queue: queue)
+    }
+
+    /// Several partners (beta.7): one reply per pair id, so a beta.6 partner still finds the one it knows.
+    public init(port: UInt16 = LanLineConfig.defaultPort, name: String, device: String?,
+                pairIDs: @escaping @Sendable () -> [String], queue: DispatchQueue) throws {
         let s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard s >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
         var one: Int32 = 1
@@ -123,7 +134,6 @@ public final class DiscoveryResponder: @unchecked Sendable {
             bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         guard rc == 0 else { let e = errno; Darwin.close(s); throw POSIXError(.init(rawValue: e) ?? .EIO) }
         _ = fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK)
-        let answer = Array(Discovery.reply(name: name, port: port, pairID: pairID))
         let probe = Array(Discovery.probe.utf8)
         let src = DispatchSource.makeReadSource(fileDescriptor: s, queue: queue)
         src.setEventHandler {
@@ -135,8 +145,11 @@ public final class DiscoveryResponder: @unchecked Sendable {
                     recvfrom(s, &buf, buf.count, 0, $0, &flen) } }
                 if n <= 0 { return }
                 guard Array(buf[0..<n]) == probe else { continue }
-                _ = withUnsafePointer(to: &from) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(s, answer, answer.count, 0, $0, flen) } }
+                for pid in pairIDs().prefix(DeviceConfig.maxPartners + 1) {
+                    let answer = Array(Discovery.reply(name: name, port: port, pairID: pid, device: device))
+                    _ = withUnsafePointer(to: &from) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        sendto(s, answer, answer.count, 0, $0, flen) } }
+                }
             }
         }
         src.setCancelHandler { Darwin.close(s) }

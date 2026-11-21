@@ -34,6 +34,8 @@ public sealed record Frame
     /// <summary>"version" (encrypted, both ways, beta.6+): this side's version, and the newest version it knows of.</summary>
     [JsonPropertyName("version")] public string? Version { get; init; }
     [JsonPropertyName("latest_known")] public LatestKnownInfo? LatestKnown { get; init; }
+    /// <summary>hello / hello_ok (beta.7+): this computer's device id.</summary>
+    [JsonPropertyName("device")] public string? Device { get; init; }
 
     public sealed record LatestKnownInfo([property: JsonPropertyName("version")] string Version, [property: JsonPropertyName("url")] string Url);
 

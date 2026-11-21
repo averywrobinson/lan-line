@@ -20,7 +20,10 @@ sealed partial class MainWindow : Window
         Glyph_Pin = "", Glyph_Unpin = "", Glyph_Min = "", Glyph_Max = "", Glyph_Restore = "",
         Glyph_Close = "", Glyph_Up = "", Glyph_Doc = "", Glyph_Upload = "", Glyph_More = "", Glyph_Folder = "\uE8B7";
 
-    Session? _session;
+    readonly Button _target = new() { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 18, 0), Visibility = Visibility.Collapsed };
+    internal bool Multi => _partners.Count >= 2;
+    string NameOf(string id) => _partners.FirstOrDefault(p => p.Id == id)?.Name ?? "partner";
+    string TargetLabel => _sendTarget is { } t ? NameOf(t) : "Everyone";
     readonly Ellipse _dot = new() { Width = 7, Height = 7, Margin = new Thickness(0, 1, 6, 0), VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _status = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
     readonly Button _pin = new() { Content = Glyph_Unpin };
@@ -162,9 +165,15 @@ sealed partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         DockPanel.SetDock(hairline, Dock.Top);
         DockPanel.SetDock(composer, Dock.Bottom);
+        DockPanel.SetDock(_target, Dock.Bottom);
+        _target.SetResourceReference(StyleProperty, "LinkButton");
+        _target.FontSize = 11;
+        _target.ToolTip = "Where Send goes: everyone, or one computer";
+        _target.Click += (_, _) => { _target.ContextMenu = TargetMenu(); _target.ContextMenu.PlacementTarget = _target; _target.ContextMenu.IsOpen = true; };
         root.Children.Add(header);
         root.Children.Add(hairline);
         root.Children.Add(composer);
+        root.Children.Add(_target);
         // The DockPanel's last child fills the rest of the window: the feed and the pairing panel share it
         // (only one is visible). Adding them as two children would dock the feed left at its content width.
         var center = new Grid();
@@ -209,6 +218,16 @@ sealed partial class MainWindow : Window
 
     // ---------- status, pin, empty state
 
+    /// <summary>--demo-multi: three paired computers, captions and a "✓ 1/2" row (no network).</summary>
+    internal void SetDemoMulti(IEnumerable<(Item Item, string Caption)> rows)
+    {
+        _partners.Clear();
+        _partners.AddRange([new PartnerInfo("mac", "MacBook Pro", true), new PartnerInfo("intel", "Intel Mac", false)]);
+        _connected = true;
+        foreach (var (i, c) in rows) Upsert(i, c);
+        RefreshStatus();
+    }
+
     internal void SetDemo(string peer, IEnumerable<Item> items)
     {
         _connected = true; _peer = peer;
@@ -220,9 +239,36 @@ sealed partial class MainWindow : Window
     {
         _dot.SetResourceReference(Shape.FillProperty, _connected ? "Green" : "IdleDot");
         _status.Text = _pairing ? (_connected ? $"Paired with {_peer}" : "Not paired yet")
+            : _connected && Multi ? $"Connected · {_partners.Count(p => p.Up)} of {_partners.Count}"
             : _connected ? $"Connected · {(_peer.Length > 0 ? _peer : "partner")}" : _statusText;
-        _placeholder.Text = $"Message {PeerLabel}";
+        _status.ToolTip = Multi ? string.Join("\n", _partners.Select(p => $"{p.Name}: {(p.Up ? "connected" : "not connected")}")) : null;
+        _placeholder.Text = Multi ? $"Message {(_sendTarget == null ? "everyone" : TargetLabel)}" : $"Message {PeerLabel}";
+        // The chevron is an icon-font glyph (private use area): the UI font has no such character and draws a box.
+        var to = new TextBlock();
+        to.Inlines.Add(new System.Windows.Documents.Run($"To: {TargetLabel} "));
+        to.Inlines.Add(new System.Windows.Documents.Run("\uE70D") { FontFamily = (FontFamily)Application.Current.Resources["IconFont"], FontSize = 9 });
+        _target.Content = to;
+        _target.Visibility = Multi && !_pairing && _composer.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
+        System.Windows.Automation.AutomationProperties.SetName(_target, $"Send to {TargetLabel}");
         System.Windows.Automation.AutomationProperties.SetName(_status, $"Status: {_status.Text}");
+    }
+
+    /// <summary>"To: Everyone ⌄": Everyone (the default) or one paired computer.</summary>
+    ContextMenu TargetMenu()
+    {
+        var m = new ContextMenu();
+        var all = new MenuItem { Header = "Everyone", IsCheckable = true, IsChecked = _sendTarget == null };
+        all.Click += (_, _) => { _sendTarget = null; RefreshStatus(); };
+        m.Items.Add(all);
+        m.Items.Add(new Separator());
+        foreach (var p in _partners)
+        {
+            var id = p.Id;
+            var mi = new MenuItem { Header = p.Up ? p.Name : $"{p.Name} (not connected)", IsCheckable = true, IsChecked = _sendTarget == id };
+            mi.Click += (_, _) => { _sendTarget = id; RefreshStatus(); };
+            m.Items.Add(mi);
+        }
+        return m;
     }
 
     void ApplyPin()
@@ -293,27 +339,48 @@ sealed partial class MainWindow : Window
 
     // ---------- session events
 
-    void Handle(SessionEvent e)
+    void Handle(HubEvent e)
     {
+        PartnerEvent(e);
         switch (e)
         {
-            case SessionEvent.Listening: _statusText = $"Waiting for {Away}…"; break;
-            case SessionEvent.Rekeyed rk: Rekeyed(rk.Token); break;
-            case SessionEvent.PeerAddresses pa: PeerAddresses(pa.Addrs); break;
-            case SessionEvent.UpdateAvailable ua: RememberLatest(ua.Version, ua.Url); ShowUpdate(ua.Version, ua.Url); break;
-            case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
-            case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
-            case SessionEvent.Status s: if (!_connected) _statusText = StatusLine(s.Text, Away); break;
-            case SessionEvent.Received r:
-                Upsert(r.Item);
+            case HubEvent.Listening: if (!_connected) _statusText = _partners.Count == 0 ? "Not paired yet" : $"Waiting for {Away}…"; break;
+            case HubEvent.UpdateAvailable ua: RememberLatest(ua.Version, ua.Url); ShowUpdate(ua.Version, ua.Url); break;
+            case HubEvent.Connected c:
+                SetUp(c.Partner, true, c.Name);
+                if (_partners.Count == 1) _peer = c.Name;
+                break;
+            case HubEvent.Disconnected d:
+                SetUp(d.Partner, false, null);
+                if (!_connected) _statusText = "Reconnecting…";
+                break;
+            case HubEvent.Status s: if (!_connected) _statusText = StatusLine(s.Text, s.Partner.Length == 0 ? Away : NameOf(s.Partner)); break;
+            case HubEvent.Received r:
+                Upsert(r.Item, Multi ? $"from {NameOf(r.Partner)}" : null);
                 if (r.Item.IsFile && r.Item.Path is { } rp) LogReceived(rp, r.Item.Size);
                 PopUp();
                 break;
-            case SessionEvent.Outgoing o: Upsert(o.Item); break;
-            case SessionEvent.ReceiveFailed f: Note($"Couldn't receive {f.Name}: {f.Reason}"); PopUp(); break;
-            case SessionEvent.Error err: if (!_pairing) Note(err.Message); break;
+            case HubEvent.Outgoing o: UpsertOutgoing(o.Item); break;
+            case HubEvent.ReceiveFailed f: Note($"Couldn't receive {f.Name}{(Multi ? $" from {NameOf(f.Partner)}" : "")}: {f.Reason}"); PopUp(); break;
+            case HubEvent.Error err: if (!_pairing) Note(err.Message); break;
         }
         RefreshStatus();
+    }
+
+    void SetUp(string id, bool up, string? name)
+    {
+        var i = _partners.FindIndex(p => p.Id == id);
+        if (i >= 0) _partners[i] = _partners[i] with { Up = up, Name = name ?? _partners[i].Name };
+        _connected = _partners.Any(p => p.Up);
+    }
+
+    /// <summary>The row for an outgoing item: one row for everyone, "to everyone · ✓ 2/3" until all have it.</summary>
+    void UpsertOutgoing(HubItem h)
+    {
+        var item = h.Item with { State = h.Summary };
+        var label = Multi ? (h.Total > 1 ? "to everyone" : h.To.Length == 1 ? $"to {NameOf(h.To[0])}" : null) : null;
+        var caption = label == null ? null : h.Total > 1 && h.Summary.Kind != ItemStateKind.Delivered ? $"{label} · ✓ {h.Delivered}/{h.Total}" : label;
+        Upsert(item, caption);
     }
 
     /// <summary>Something arrived: bring the window back even if it was minimized or behind others.</summary>
@@ -337,10 +404,11 @@ sealed partial class MainWindow : Window
 
     // ---------- feed
 
-    void Upsert(Item item)
+    void Upsert(Item item, string? caption = null)
     {
-        if (_rows.TryGetValue(item.Id, out var row)) { row.Update(item); return; }
+        if (_rows.TryGetValue(item.Id, out var row)) { row.Update(item); if (caption != null) row.SetCaption(caption); return; }
         row = new ItemRow(item, this);
+        row.SetCaption(caption);
         _rows[item.Id] = row;
         Append(row.View);
     }
@@ -405,25 +473,26 @@ sealed partial class MainWindow : Window
     void SendInput()
     {
         var t = _input.Text;
-        if (string.IsNullOrWhiteSpace(t) || _session == null) return;
-        Upsert(_session.SendText(t));
+        if (string.IsNullOrWhiteSpace(t) || _hub == null || _partners.Count == 0) return;
+        UpsertOutgoing(_hub.SendText(t, _sendTarget));
         _input.Clear();
     }
 
     void SendFiles(IEnumerable<string> paths)
     {
-        if (_session == null || _pairing) return;
+        if (_hub == null || _pairing) return;
+        if (_partners.Count == 0) { Note("Not paired yet: nothing was sent"); return; }
         foreach (var p in paths)
         {
             if (IsOwn(p)) continue;
             if (Directory.Exists(p))
             {
                 var skipped = Session.ScanFolder(p).Skipped;
-                Upsert(_session.SendFolder(p));
+                UpsertOutgoing(_hub.SendFolder(p, _sendTarget));
                 if (skipped > 0) Note($"{System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(p))}: {skipped} shortcut{(skipped == 1 ? "" : "s")} (links) left out");
                 continue;
             }
-            if (File.Exists(p)) Upsert(_session.SendFile(p));
+            if (File.Exists(p)) UpsertOutgoing(_hub.SendFile(p, _sendTarget));
         }
     }
 

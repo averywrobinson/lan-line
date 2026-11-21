@@ -43,6 +43,10 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("version parse and order", T.VersionOrder), ("update url allowlist", T.UrlAllowlist), ("version.json parse", T.VersionJson),
     ("failed update checks are quiet", T.ChecksQuiet), ("auto update check off by default", T.AutoOff),
     ("peer relays newer version", T.PeerRelay), ("peer version alone links release page", T.PeerVersionOnly), ("peer can't push bad links", T.PeerBadLinks),
+    ("config migrates single pairing", T.CfgMigrate), ("config add, forget, rename, cap", T.CfgAddForget),
+    ("hub triangle and everyone", T.HubTriangle), ("hub wrong secret refused", T.HubWrongSecret), ("hub same partner replaces only itself", T.HubReplace),
+    ("hub offline partner gets queued items", T.HubOffline), ("hub pairing adds a partner, forget drops it", T.HubPairing),
+    ("hub discovery answers per partner", T.HubResponder), ("hub finds a moved partner", T.HubFindMoved),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -1166,5 +1170,225 @@ static class T
         await c.Send(Frame.TextItem("after", "done"));
         await H.Until(() => r.Received.Count > 0, "text after", 5);
         H.Eq(0, UpdatesOf(r).Count, "nothing shown");
+    }
+
+    // ---------- beta.7: partners and the Hub ----------
+
+    public static Task CfgMigrate()
+    {
+        var tok = string.Concat(Enumerable.Repeat("ab", 32));
+        var path = Path.Combine(H.TempDir("cfg"), "config.json");
+        File.WriteAllText(path, $"{{\"hosts\":[\"192.168.1.20\"],\"peer\":\"Mac\",\"port\":47830,\"role\":\"listen\",\"token\":\"{tok}\"}}");
+        var c = DeviceConfig.Load(path, "connect");
+        H.Eq(1, c.Peers.Count, "one partner");
+        H.True(c.Peers[0] is { Role: "listen", Name: "Mac" } && c.Peers[0].Secret == tok && c.Peers[0].Hosts.SequenceEqual(["192.168.1.20"]), "migrated");
+        H.Eq(32, c.DeviceId.Length, "device id made");
+        c.Save(path);
+        var again = DeviceConfig.Load(path, "connect");
+        H.True(again.DeviceId == c.DeviceId && again.Peers.Count == 1 && again.Peers[0].SameAs(c.Peers[0]), "round trip");
+        var legacy = LanLineConfig.Load(path);
+        H.True(legacy.Token == tok && legacy.Role == "listen", "first partner mirrored for beta.6");
+        File.WriteAllText(path, "{\"port\":47830,\"token\":\"ABCDE12345\"}");
+        H.Eq("connect", DeviceConfig.Load(path, "connect").Peers[0].Role, "missing role = platform default");
+        File.WriteAllText(path, "{\"port\":47830}");
+        H.Eq(0, DeviceConfig.Load(path, "connect").Peers.Count, "fresh config: no partners");
+        return Task.CompletedTask;
+    }
+
+    public static Task CfgAddForget()
+    {
+        var c = new DeviceConfig();
+        for (var i = 0; i < DeviceConfig.MaxPartners; i++) c.Add(new Partner { Id = $"dev{i}", Name = $"C{i}", Secret = Secrets.NewToken(), Role = "listen" });
+        try { c.Add(new Partner { Id = "dev9", Name = "x", Secret = Secrets.NewToken(), Role = "listen" }); throw new Exception("cap not enforced"); }
+        catch (TooManyPartnersException) { }
+        var fresh = Secrets.NewToken();
+        c.Add(new Partner { Id = "dev3", Name = "again", Secret = fresh, Role = "connect" });
+        H.True(c.Peers.Count == DeviceConfig.MaxPartners && c.Partner("dev3")!.Secret == fresh, "same id replaces");
+        c.Rename("dev3", "Studio PC");
+        H.Eq("Studio PC", c.Partner("dev3")!.Name, "renamed");
+        c.Forget("dev3");
+        H.True(c.Partner("dev3") == null && c.Peers.Count == DeviceConfig.MaxPartners - 1, "forgotten");
+        foreach (var p in c.Peers.ToList()) c.Forget(p.Id);
+        var path = Path.Combine(H.TempDir("cfg-empty"), "config.json");
+        c.Save(path);
+        H.True(!File.ReadAllText(path).Contains("\"token\""), "no legacy token left");
+        return Task.CompletedTask;
+    }
+
+    sealed class HubRec
+    {
+        readonly System.Collections.Concurrent.ConcurrentQueue<HubEvent> _e = new();
+        public void Add(HubEvent e) => _e.Enqueue(e);
+        public List<HubEvent> All => [.. _e];
+        public int? Port => All.OfType<HubEvent.Listening>().Select(l => (int?)l.Port).FirstOrDefault();
+        public bool Up(string p)
+        {
+            var up = false;
+            foreach (var e in All) { if (e is HubEvent.Connected c && c.Partner == p) up = true; if (e is HubEvent.Disconnected d && d.Partner == p) up = false; }
+            return up;
+        }
+        public int Connects(string p) => All.OfType<HubEvent.Connected>().Count(c => c.Partner == p);
+        public List<Item> Got(string? from = null) => All.OfType<HubEvent.Received>().Where(r => from == null || r.Partner == from).Select(r => r.Item).ToList();
+        public HubItem? Last(string id) => All.OfType<HubEvent.Outgoing>().LastOrDefault(o => o.Item.Id == id)?.Item;
+    }
+
+    static HubConfig HubCfg(string tag, string device, int port = 0) => new()
+    {
+        Name = tag, DeviceId = device, DownloadDir = H.TempDir(tag), Port = port, BindHost = "127.0.0.1",
+        Tune = s => new SessionConfig { Token = s.Token, Name = s.Name, DownloadDir = s.DownloadDir, AppVersion = s.AppVersion, LatestKnown = s.LatestKnown,
+                                        DeviceId = s.DeviceId, RekeyOnPair = s.RekeyOnPair, External = s.External, Advertise = s.Advertise,
+                                        Backoff = [0.2, 0.4], DialTimeout = TimeSpan.FromSeconds(2) },
+    };
+
+    static Partner P(string id, string name, string secret, string role, int? port = null) =>
+        new() { Id = id, Name = name, Secret = secret, Role = role, Hosts = role == "connect" ? ["127.0.0.1"] : [], Port = port };
+
+    static readonly string AB = Secrets.NewToken(), AC = Secrets.NewToken(), BC = Secrets.NewToken();
+
+    static async Task<(Hub A, HubRec RA, Hub B, HubRec RB, Hub C, HubRec RC)> Triangle()
+    {
+        HubRec ra = new(), rb = new(), rc = new();
+        var a = new Hub(HubCfg("A", "device-aaaa"), [P("device-bbbb", "B", AB, "listen"), P("device-cccc", "C", AC, "listen")], ra.Add);
+        a.Start();
+        await H.Until(() => ra.Port != null, "A listening", 5);
+        var c = new Hub(HubCfg("C", "device-cccc"), [P("device-aaaa", "A", AC, "connect", ra.Port), P("device-bbbb", "B", BC, "listen")], rc.Add);
+        c.Start();
+        await H.Until(() => rc.Port != null, "C listening", 5);
+        var b = new Hub(HubCfg("B", "device-bbbb"), [P("device-aaaa", "A", AB, "connect", ra.Port), P("device-cccc", "C", BC, "connect", rc.Port)], rb.Add);
+        b.Start();
+        await H.Until(() => ra.Up("device-bbbb") && ra.Up("device-cccc") && rb.Up("device-aaaa") && rb.Up("device-cccc") && rc.Up("device-aaaa") && rc.Up("device-bbbb"), "six links up", 10);
+        return (a, ra, b, rb, c, rc);
+    }
+
+    public static async Task HubTriangle()
+    {
+        var (a, ra, b, rb, c, rc) = await Triangle();
+        try
+        {
+            H.True(ra.All.Contains(new HubEvent.PeerDevice("device-bbbb", "device-bbbb")), "A learns B's device id");
+            var t = b.SendText("hello everyone", null);
+            H.True(t.To.Order().SequenceEqual(["device-aaaa", "device-cccc"]), "to both");
+            await H.Until(() => ra.Got("device-bbbb").Count == 1 && rc.Got("device-bbbb").Count == 1, "both got it", 5);
+            await H.Until(() => rb.Last(t.Id)?.Delivered == 2, "2/2", 5);
+            H.Eq(ItemStateKind.Delivered, rb.Last(t.Id)!.Summary.Kind, "summary delivered");
+            var src = H.RandomFile(H.TempDir("hub-src"), "only-c.bin", 600_000);
+            var f = b.SendFile(src, "device-cccc");
+            await H.Until(() => rc.Got("device-bbbb").Count == 2, "C got the file", 10);
+            await H.Until(() => rb.Last(f.Id)?.Summary.Kind == ItemStateKind.Delivered, "1/1", 5);
+            H.Eq(1, ra.Got().Count, "A didn't get the file");
+            H.Eq(Hashing.Sha256File(src), Hashing.Sha256File(rc.Got("device-bbbb")[^1].Path!), "same bytes");
+            var d = a.SendFolder(SampleFolder("hub-fold"), null);
+            await H.Until(() => ra.Last(d.Id)?.Delivered == 2, "folder 2/2", 15);
+        }
+        finally { a.Stop(); b.Stop(); c.Stop(); }
+    }
+
+    public static async Task HubWrongSecret()
+    {
+        var (a, ra, b, _, c, _) = await Triangle();
+        var rx = new HubRec();
+        var x = new Hub(HubCfg("X", "device-xxxx"), [P("device-aaaa", "A", Secrets.NewToken(), "connect", ra.Port)], rx.Add);
+        x.Start();
+        try
+        {
+            await H.Until(() => rx.All.OfType<HubEvent.Status>().Any(s => s.Text.StartsWith("Refused")), "refused", 5);
+            H.True(!rx.Up("device-aaaa"), "never connected");
+            H.True(ra.Connects("device-bbbb") == 1 && ra.Connects("device-cccc") == 1, "others untouched");
+        }
+        finally { x.Stop(); a.Stop(); b.Stop(); c.Stop(); }
+    }
+
+    public static async Task HubReplace()
+    {
+        var (a, ra, b, _, c, _) = await Triangle();
+        try
+        {
+            using var raw = await RawClient.Connect(ra.Port!.Value);
+            H.Eq("hello_ok", (await raw.Hello(AB, "B again"))?.Type, "accepted");
+            await H.Until(() => ra.Connects("device-bbbb") >= 2, "B reconnects", 5);
+            H.True(ra.Connects("device-cccc") == 1 && ra.Up("device-cccc"), "C's link never touched");
+        }
+        finally { a.Stop(); b.Stop(); c.Stop(); }
+    }
+
+    public static async Task HubOffline()
+    {
+        var (a, ra, b, rb, c, _) = await Triangle();
+        var cport = c.BoundPort!.Value;
+        c.Stop();
+        Hub? c2 = null;
+        try
+        {
+            await H.Until(() => !rb.Up("device-cccc"), "C gone", 10);
+            var t = b.SendText("while C was away", null);
+            await H.Until(() => ra.Got("device-bbbb").Any(i => i.Text == "while C was away"), "A has it", 5);
+            H.Eq(1, rb.Last(t.Id)!.Delivered, "1 of 2 so far");
+            var rc2 = new HubRec();
+            c2 = new Hub(HubCfg("C", "device-cccc", cport), [P("device-aaaa", "A", AC, "connect", ra.Port), P("device-bbbb", "B", BC, "listen")], rc2.Add);
+            c2.Start();
+            await H.Until(() => rc2.Got("device-bbbb").Any(i => i.Text == "while C was away"), "C gets it after coming back", 20);
+            await H.Until(() => rb.Last(t.Id)?.Delivered == 2, "2/2", 5);
+        }
+        finally { a.Stop(); b.Stop(); c2?.Stop(); }
+    }
+
+    public static async Task HubPairing()
+    {
+        var (a, ra, b, _, c, _) = await Triangle();
+        var rd = new HubRec();
+        const string code = "PAIRD12345";
+        a.Add(P("pairing-1", "New computer", code, "listen"), pairing: true);
+        var d = new Hub(HubCfg("D", "device-dddd"), [P("pairing-1", "A", code, "connect", ra.Port)], rd.Add);
+        d.Start();
+        try
+        {
+            await H.Until(() => rd.Up("pairing-1") && ra.Up("pairing-1"), "D paired", 10);
+            var ak = ra.All.OfType<HubEvent.Rekeyed>().FirstOrDefault(r => r.Partner == "pairing-1")?.Token;
+            var dk = rd.All.OfType<HubEvent.Rekeyed>().FirstOrDefault(r => r.Partner == "pairing-1")?.Token;
+            H.True(ak != null && ak == dk, "same new secret");
+            H.True(ra.All.Contains(new HubEvent.PeerDevice("pairing-1", "device-dddd")), "A learns D's device id");
+            H.True(ra.Connects("device-bbbb") == 1 && ra.Connects("device-cccc") == 1, "others untouched");
+            a.Remove("pairing-1");
+            await H.Until(() => !rd.Up("pairing-1"), "D dropped after Forget", 5);
+        }
+        finally { d.Stop(); a.Stop(); b.Stop(); c.Stop(); }
+    }
+
+    public static async Task HubResponder()
+    {
+        var port = Random.Shared.Next(40000, 49000);
+        string s1 = Secrets.NewToken(), s2 = Secrets.NewToken();
+        var hub = new Hub(HubCfg("disc", "device-disc"), [P("p1", "One", s1, "listen"), P("p2", "Two", s2, "listen"), P("p3", "Dialled", Secrets.NewToken(), "connect", 9)], _ => { });
+        hub.Start();
+        hub.StartResponder(port);
+        try
+        {
+            await Task.Delay(300);
+            var found = await Discovery.SearchAsync(port, TimeSpan.FromSeconds(0.6), ["127.0.0.1"]);
+            H.True(found.Select(f => f.PairId).Order().SequenceEqual(new[] { PairCode.PairId(s1), PairCode.PairId(s2) }.Order()), "one reply per listening partner");
+            H.True(found.All(f => f.Device == "device-disc"), "device id in each reply");
+        }
+        finally { hub.Stop(); }
+    }
+
+    public static async Task HubFindMoved()
+    {
+        var secret = Secrets.NewToken();
+        HubRec rl = new(), rd = new();
+        var l = new Hub(HubCfg("moved-l", "device-moved"), [P("device-dialer", "D", secret, "listen")], rl.Add);
+        l.Start();
+        await H.Until(() => rl.Port != null, "listening", 5);
+        var dport = Random.Shared.Next(40000, 49000);
+        l.StartResponder(dport);
+        var d = new Hub(HubCfg("moved-d", "device-dialer"), [P("device-moved", "L", secret, "connect", rl.Port) with { Hosts = ["192.0.2.1"] }], rd.Add);
+        d.Start();
+        try
+        {
+            await Task.Delay(300);
+            await d.FindMoved(dport, ["127.0.0.1"], TimeSpan.FromSeconds(0.5));
+            await H.Until(() => rd.Up("device-moved"), "found and connected", 10);
+            H.True(rd.All.OfType<HubEvent.PeerAddresses>().Any(p => p.Addrs.SequenceEqual(["127.0.0.1", "192.0.2.1"])), "new address first");
+        }
+        finally { d.Stop(); l.Stop(); }
     }
 }

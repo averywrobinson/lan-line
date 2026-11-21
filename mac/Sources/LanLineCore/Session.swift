@@ -32,11 +32,15 @@ public struct SessionConfig: Sendable {
     /// Listener: addresses to tell an authenticated dialer about (its fallbacks if one stops working).
     public var advertise: [String] = []
     /// What this side tells its peer it can do (PROTOCOL.md "Capabilities"). Tests set [] to act like beta.5.
-    public var caps: [String] = ["sha_end", "folders"]
+    public var caps: [String] = ["sha_end", "folders", "multi"]
     /// This app's version ("0.9.0-beta.6"), told to the other computer so either can say "an update is available".
     public var appVersion = ""
     /// The newest version this computer already knows of (saved by the app), passed on to the other computer.
     public var latestKnown: Updates.Available?
+    /// This computer's device id, sent in hello / hello_ok (beta.7+).
+    public var deviceID = ""
+    /// A listener that owns no socket: the Hub accepts connections and hands this Session the ones for its partner.
+    public var external = false
 
     public init(token: String, name: String, downloadDir: URL) {
         self.token = token; self.name = name; self.downloadDir = downloadDir
@@ -103,6 +107,8 @@ public enum SessionEvent: Sendable, Equatable {
     case peerAddresses([String])
     /// A newer Lan-Line exists (heard from the other computer, or from an update check): show a link, nothing more.
     case updateAvailable(version: String, url: String)
+    /// The other computer's device id, from its hello / hello_ok (beta.7+).
+    case peerDevice(String)
 }
 
 /// The one Lan-Line session object. The window, the headless mode and the tests all drive this.
@@ -185,14 +191,14 @@ public final class Session: @unchecked Sendable {
     private var lastHeard = Date.distantPast
     private var lastBeat = Date.distantPast
 
-    public init(role: Role, config: SessionConfig,
+    public init(role: Role, config: SessionConfig, queue: DispatchQueue? = nil,
                 clock: @escaping @Sendable () -> Date = { Date() },
                 handler: @escaping @Sendable (SessionEvent) -> Void) {
         self.role = role; self.config = config; self.handler = handler; self.now = clock
         self.token = config.token
         // A short token is a pairing code from 0.9.0-beta.1: upgrade it on the next connection too.
         self.rekeyOnPair = config.rekeyOnPair || (config.token.count < 32 && { if case .listener = role { return true }; return false }())
-        self.queue = DispatchQueue(label: "lan-line.session")
+        self.queue = queue ?? DispatchQueue(label: "lan-line.session")
         self.latestKnown = config.latestKnown
     }
 
@@ -295,7 +301,7 @@ public final class Session: @unchecked Sendable {
             timer = t
         }
         switch role {
-        case .listener(let port, let bindHost): listen(port: port, bindHost: bindHost)
+        case .listener(let port, let bindHost): if !config.external { listen(port: port, bindHost: bindHost) }
         case .dialer: dialNext()
         }
     }
@@ -310,6 +316,25 @@ public final class Session: @unchecked Sendable {
         } catch {
             emit(.error("listen failed on port \(port): \(error.localizedDescription)"))
         }
+    }
+
+    // MARK: Hub entry points (on the queue)
+
+    /// Does this hello's MAC match this partner's secret (or the code it is replacing)?
+    func matchesHello(_ f: Frame) -> Bool {
+        guard !stopped, f.type == "hello", f.v == LL2.version, let n = f.nonce.flatMap({ Data(base64Encoded: $0) }),
+              let e = f.epk.flatMap({ Data(base64Encoded: $0) }), let m = f.mac.flatMap({ Data(base64Encoded: $0) }) else { return false }
+        let t1 = LL2.t1(name: f.name ?? "", nonce: n, epk: e)
+        return ([token] + (oldToken.map { [$0] } ?? [])).contains { LL2.verify(LL2.macKey($0), t1, m) }
+    }
+
+    /// Take over a link the Hub accepted, and answer its hello.
+    func adopt(_ l: Link, hello: String) {
+        l.retarget { [weak self, weak l] ev in
+            guard let self, let l else { return }
+            self.onLinkEvent(l, ev)
+        }
+        handleHello(hello, on: l)
     }
 
     private func accept(fd: Int32, peer: String) {
@@ -369,6 +394,7 @@ public final class Session: @unchecked Sendable {
                 dialHS = hs
                 var hello = hs.hello
                 hello.caps = config.caps   // outside the MAC: stripping it only falls back to beta.5 behaviour
+                if !config.deviceID.isEmpty { hello.device = config.deviceID }
                 l.send(text: hello.json)
             }
         case .closed(let reason):
@@ -426,7 +452,9 @@ public final class Session: @unchecked Sendable {
         }
         var ok = ans.ok
         ok.caps = config.caps
+        if !config.deviceID.isEmpty { ok.device = config.deviceID }
         peerCaps = Set(f.caps ?? [])
+        if let d = f.device, Self.isDeviceID(d) { emit(.peerDevice(d)) }
         l.send(text: ok.json)
         l.channel = ans.channel            // everything after hello_ok is sealed
         if let rekey { l.send(text: Frame.rekey(rekey).json) }
@@ -453,11 +481,14 @@ public final class Session: @unchecked Sendable {
         }
         l.channel = ch
         peerCaps = Set(f.caps ?? [])
+        if let d = f.device, Self.isDeviceID(d) { emit(.peerDevice(d)) }
         dialHS = nil
         dialing = nil
         attempt = 0
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
+
+    static func isDeviceID(_ s: String) -> Bool { (8...64).contains(s.count) && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } }
 
     static func isIPv4(_ s: String) -> Bool {
         let parts = s.split(separator: ".", omittingEmptySubsequences: false)

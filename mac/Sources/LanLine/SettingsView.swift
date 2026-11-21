@@ -18,6 +18,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                if !model.settingsFirstRun { PairedList(model: model) }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Storage for received files").font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text)
                     if model.settingsFirstRun {
@@ -191,5 +192,55 @@ private struct UsageBar: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Settings → Paired computers: rename, forget, pair another (beta.7).
+private struct PairedList: View {
+    @ObservedObject var model: AppModel
+    @State private var editing: String?
+    @State private var draftName = ""
+    @State private var forgetting: PartnerInfo?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let p = Palette.of(scheme)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Paired computers").font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text)
+            ForEach(model.partners) { partner in
+                HStack(spacing: 8) {
+                    Circle().fill(partner.up ? p.connected : p.idleDot).frame(width: 7, height: 7)
+                        .accessibilityLabel(partner.up ? "connected" : "not connected")
+                    if editing == partner.id {
+                        TextField("Name", text: $draftName, onCommit: {
+                            model.partnerActions.rename(partner.id, draftName); editing = nil
+                        })
+                        .textFieldStyle(.roundedBorder).font(.system(size: 12)).frame(maxWidth: 180)
+                    } else {
+                        Text(partner.name).font(.system(size: 12)).foregroundStyle(p.text).lineLimit(1)
+                    }
+                    Spacer()
+                    Button(editing == partner.id ? "Done" : "Rename") {
+                        if editing == partner.id { model.partnerActions.rename(partner.id, draftName); editing = nil }
+                        else { draftName = partner.name; editing = partner.id }
+                    }
+                    .buttonStyle(.link).font(.system(size: 11))
+                    Button("Forget") { forgetting = partner }
+                        .buttonStyle(.link).font(.system(size: 11)).foregroundStyle(p.danger)
+                }
+            }
+            if model.partners.isEmpty {
+                Text("None yet.").font(.system(size: 11)).foregroundStyle(p.textSecondary)
+            }
+            Button("Pair another computer…") { model.partnerActions.pairAnother() }
+                .buttonStyle(.link).font(.system(size: 11.5))
+                .disabled(model.partners.count >= DeviceConfig.maxPartners)
+        }
+        .confirmationDialog("Forget \(forgetting?.name ?? "")?", isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } })) {
+            Button("Forget", role: .destructive) { if let f = forgetting { model.partnerActions.forget(f.id) }; forgetting = nil }
+            Button("Cancel", role: .cancel) { forgetting = nil }
+        } message: {
+            Text("Lan-Line stops connecting to it and deletes its pairing secret. Files you already received stay.")
+        }
     }
 }

@@ -103,7 +103,12 @@ sealed class ItemRow
         bubble.HorizontalAlignment = item.Incoming ? HorizontalAlignment.Left : HorizontalAlignment.Right;
         bubble.Margin = item.Incoming ? new Thickness(0, 4, 44, 4) : new Thickness(44, 4, 0, 4);
         bubble.Tag = item.Id;
-        View = bubble;
+        _caption.HorizontalAlignment = item.Incoming ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        _caption.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        var outer = new StackPanel { Tag = item.Id };
+        outer.Children.Add(bubble);
+        outer.Children.Add(_caption);
+        View = outer;
         Update(item);
     }
 
@@ -118,6 +123,15 @@ sealed class ItemRow
         View.ToolTip = null;
         View.Cursor = null;
         View.ContextMenu = null;
+    }
+
+    readonly TextBlock _caption = new() { FontSize = 10, Margin = new Thickness(6, -2, 6, 4), Visibility = Visibility.Collapsed };
+
+    /// <summary>"from STUDIO-PC" / "to everyone · ✓ 2/3": only with 2+ paired computers.</summary>
+    public void SetCaption(string? text)
+    {
+        _caption.Text = text ?? "";
+        _caption.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public void Update(Item item)

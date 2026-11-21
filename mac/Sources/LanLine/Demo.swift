@@ -30,6 +30,18 @@ enum Demo {
         m.showingSettings = true
     }
 
+    /// `--demo-multi`: three paired computers, labels and a "✓ 1/2" row.
+    static func multi(_ m: AppModel) {
+        fill(m)
+        m.partners = [PartnerInfo(id: "pc", name: "Studio PC", up: true), PartnerInfo(id: "intel", name: "Intel Mac", up: false)]
+        m.rows[0].label = "from Studio PC"
+        m.rows[1].label = "to everyone"; m.rows[1].total = 2; m.rows[1].delivered = 2
+        m.rows[2].label = "to Intel Mac"
+        m.rows[3].label = "from Studio PC"
+        m.rows[4].label = "to everyone"; m.rows[4].total = 2; m.rows[4].delivered = 1
+        m.rows[4].item = Item(id: "5", kind: m.rows[4].item!.kind, incoming: false, state: .sent)
+    }
+
     static func fill(_ m: AppModel, empty: Bool = false) {
         m.connected = true
         m.peer = "Studio PC"

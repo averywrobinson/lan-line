@@ -74,6 +74,7 @@ private struct Header: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Status: \(model.statusLine)")
+                .help(model.multi ? model.partnerStates : "")
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 76)   // keep clear of the traffic lights and the pin
@@ -159,14 +160,22 @@ private struct RowView: View {
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
         } else if let item = row.item {
-            HStack(spacing: 0) {
-                if !item.incoming { Spacer(minLength: 44) }
-                switch item.kind {
-                case .text(let t): TextBubble(item: item, text: t)
-                case .file(let name, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model)
-                case .folder(let name, let count, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model, count: count)
+            VStack(alignment: item.incoming ? .leading : .trailing, spacing: 2) {
+                HStack(spacing: 0) {
+                    if !item.incoming { Spacer(minLength: 44) }
+                    switch item.kind {
+                    case .text(let t): TextBubble(item: item, text: t)
+                    case .file(let name, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model)
+                    case .folder(let name, let count, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model, count: count)
+                    }
+                    if item.incoming { Spacer(minLength: 44) }
                 }
-                if item.incoming { Spacer(minLength: 44) }
+                if let caption = RowView.caption(row) {
+                    Text(caption)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.of(scheme).textSecondary)
+                        .padding(.horizontal, 6)
+                }
             }
             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
         }
@@ -192,6 +201,15 @@ private struct UpdateNote: View {
                 .accessibilityLabel("Dismiss update notice")
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension RowView {
+    /// "from STUDIO-PC", "to everyone · ✓ 2/3": only with 2+ partners; the count shows until all have it.
+    static func caption(_ row: Row) -> String? {
+        guard let label = row.label else { return nil }
+        guard row.total > 1, row.item?.state != .delivered else { return label }
+        return "\(label) · ✓ \(row.delivered)/\(row.total)"
     }
 }
 

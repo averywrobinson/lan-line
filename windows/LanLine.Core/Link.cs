@@ -20,7 +20,7 @@ sealed class Link
 {
     const int MaxMessage = 2 << 20;
     readonly SerialQueue _q;
-    readonly Action<Link, LinkEvent> _onEvent;
+    Action<Link, LinkEvent> _onEvent;
     readonly CancellationTokenSource _cts = new();
     readonly Channel<(byte[] Data, WebSocketMessageType Type, Action<bool>? Done)> _sendQ =
         Channel.CreateUnbounded<(byte[], WebSocketMessageType, Action<bool>?)>(new UnboundedChannelOptions { SingleReader = true });
@@ -140,6 +140,9 @@ sealed class Link
         }
         _onEvent(this, ev);
     }
+
+    /// <summary>Hand the link's events to someone else (the Hub routes an accepted link to its partner's Session). On the queue.</summary>
+    public void Retarget(Action<Link, LinkEvent> onEvent) { if (!IsClosed) _onEvent = onEvent; }
 
     public void SendText(string s, Action<bool>? done = null)
     {

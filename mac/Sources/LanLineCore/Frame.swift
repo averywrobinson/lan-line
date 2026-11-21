@@ -31,6 +31,8 @@ public struct Frame: Codable, Sendable, Equatable {
     /// "version" (encrypted, both ways, beta.6+): this side's version, and the newest version it knows of.
     public var version: String?
     public var latestKnown: LatestKnown?
+    /// hello / hello_ok (beta.7+): this computer's device id, so a partner can be recognised after it moves.
+    public var device: String?
 
     public struct LatestKnown: Codable, Sendable, Equatable {
         public var version: String
@@ -39,7 +41,7 @@ public struct Frame: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, v, token, name, id, text, size, sha256, ok, err, rekey, addrs, nonce, epk, mac, caps, folder, path, count, version
+        case type, v, token, name, id, text, size, sha256, ok, err, rekey, addrs, nonce, epk, mac, caps, folder, path, count, version, device
         case latestKnown = "latest_known"
     }
 

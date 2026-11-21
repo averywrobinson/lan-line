@@ -34,7 +34,11 @@ public sealed class SessionConfig
     /// <summary>Listener: addresses to tell an authenticated dialer about (its fallbacks).</summary>
     public string[] Advertise { get; init; } = [];
     /// <summary>What this side tells its peer it can do (PROTOCOL.md "Capabilities"). Tests set [] to act like beta.5.</summary>
-    public string[] Caps { get; init; } = ["sha_end", "folders"];
+    public string[] Caps { get; init; } = ["sha_end", "folders", "multi"];
+    /// <summary>This computer's device id, sent in hello / hello_ok (beta.7+).</summary>
+    public string DeviceId { get; init; } = "";
+    /// <summary>A listener that owns no socket: the Hub accepts connections and hands this Session its partner's.</summary>
+    public bool External { get; init; }
     /// <summary>This app's version ("0.9.0-beta.6"), told to the other computer so either can say "an update is available".</summary>
     public string AppVersion { get; init; } = "";
     /// <summary>The newest version this computer already knows of (saved by the app), passed on to the other computer.</summary>
@@ -76,6 +80,8 @@ public abstract record SessionEvent
     public sealed record PeerAddresses(string[] Addrs) : SessionEvent;
     /// <summary>A newer Lan-Line exists (from the other computer or an update check): show a link, nothing more.</summary>
     public sealed record UpdateAvailable(string Version, string Url) : SessionEvent;
+    /// <summary>The other computer's device id, from its hello / hello_ok (beta.7+).</summary>
+    public sealed record PeerDevice(string Device) : SessionEvent;
     public sealed record Disconnected(string Reason) : SessionEvent;
     public sealed record Received(Item Item) : SessionEvent;
     public sealed record Outgoing(Item Item) : SessionEvent;
@@ -94,7 +100,8 @@ public sealed class Session : IDisposable
 {
     public Role Role { get; }
     public SessionConfig Config { get; }
-    readonly SerialQueue _q = new("lan-line.session");
+    readonly SerialQueue _q;
+    readonly bool _ownsQueue;
     readonly Action<SessionEvent> _handler;
     readonly Func<DateTime> _now;
 
@@ -146,8 +153,10 @@ public sealed class Session : IDisposable
     readonly HashSet<string> _done = [];
     DateTime _lastHeard, _lastBeat;
 
-    public Session(Role role, SessionConfig config, Action<SessionEvent> handler, Func<DateTime>? clock = null)
+    public Session(Role role, SessionConfig config, Action<SessionEvent> handler, Func<DateTime>? clock = null, SerialQueue? queue = null)
     {
+        _q = queue ?? new SerialQueue("lan-line.session");
+        _ownsQueue = queue == null;
         Role = role; Config = config; _handler = handler; _now = clock ?? (() => DateTime.UtcNow);
         _token = config.Token;
         _latestKnown = config.LatestKnown;
@@ -174,7 +183,7 @@ public sealed class Session : IDisposable
         });
     }
 
-    public void Dispose() { Stop(); _q.Dispose(); }
+    public void Dispose() { Stop(); if (_ownsQueue) _q.Dispose(); }
 
     public Item SendText(string text)
     {
@@ -256,6 +265,7 @@ public sealed class Session : IDisposable
             _timer = new Timer(_ => _q.Post(TickOnQueue), null, Config.TickInterval, Config.TickInterval);
         switch (Role)
         {
+            case Role.Listen when Config.External: break;   // the Hub owns the socket
             case Role.Listen r:
                 try
                 {
@@ -269,6 +279,25 @@ public sealed class Session : IDisposable
                 break;
         }
     }
+
+    // ---------- Hub entry points (on the queue) ----------
+
+    /// <summary>Does this hello's MAC match this partner's secret (or the code it is replacing)?</summary>
+    internal bool MatchesHello(Frame f)
+    {
+        if (_stopped || f is not { Type: "hello", V: LL2.Version } || LL2.B64(f.Nonce) is not { } n || LL2.B64(f.Epk) is not { } e || LL2.B64(f.Mac) is not { } m) return false;
+        var t1 = LL2.T1(f.Name ?? "", n, e);
+        return LL2.Verify(LL2.MacKey(_token), t1, m) || (_oldToken != null && LL2.Verify(LL2.MacKey(_oldToken), t1, m));
+    }
+
+    /// <summary>Take over a link the Hub accepted, and answer its hello.</summary>
+    internal void Adopt(Link l, string hello)
+    {
+        l.Retarget(OnLinkEvent);
+        HandleHello(hello, l);
+    }
+
+    internal static bool IsDeviceId(string s) => s.Length is >= 8 and <= 64 && s.All(c => c < 128 && (char.IsLetterOrDigit(c) || c == '-'));
 
     void Accept(WebSocket ws, string peer)
     {
@@ -318,7 +347,7 @@ public sealed class Session : IDisposable
                 if (ReferenceEquals(l, _dialing))
                 {
                     _dialHs = new DialerHandshake(_token, Config.Name);
-                    l.SendText((_dialHs.Hello with { Caps = Config.Caps }).Json);   // outside the MAC: stripping it only means beta.5 behaviour
+                    l.SendText((_dialHs.Hello with { Caps = Config.Caps, Device = Config.DeviceId.Length > 0 ? Config.DeviceId : null }).Json);   // outside the MAC: stripping it only means beta.5 behaviour
                 }
                 break;
             case LinkEventKind.Closed:
@@ -383,7 +412,8 @@ public sealed class Session : IDisposable
         }
         else if (ans.SecretIndex == 1) rekey = _token;   // the dialer still has the pairing code: it missed the swap
         _peerCaps = [.. f.Caps ?? []];
-        l.SendText((ans.Ok with { Caps = Config.Caps }).Json);
+        if (f.Device is { } fd && IsDeviceId(fd)) Emit(new SessionEvent.PeerDevice(fd));
+        l.SendText((ans.Ok with { Caps = Config.Caps, Device = Config.DeviceId.Length > 0 ? Config.DeviceId : null }).Json);
         l.Secure = ans.Channel;   // everything after hello_ok is sealed
         if (rekey != null) l.SendText(Frame.RekeyTo(rekey).Json);
         if (Config.Advertise.Length > 0) l.SendText(Frame.Addresses(Config.Advertise).Json);
@@ -413,6 +443,7 @@ public sealed class Session : IDisposable
         }
         l.Secure = ch;
         _peerCaps = [.. f.Caps ?? []];
+        if (f.Device is { } dev && IsDeviceId(dev)) Emit(new SessionEvent.PeerDevice(dev));
         _dialHs = null;
         _dialing = null;
         _attempt = 0;

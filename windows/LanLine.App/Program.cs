@@ -35,10 +35,11 @@ static class Program
         Theme.Apply(app.Resources);
         var demoPair = Arg(args, "--demo-pair");
         var demoSettings = Arg(args, "--demo-settings");
-        var demo = args.Contains("--demo") || demoPair != null || demoSettings != null;
+        var demo = args.Contains("--demo") || args.Contains("--demo-multi") || demoPair != null || demoSettings != null;
         var w = new MainWindow(args, demo);
         if (demoSettings != null) { Demo.Fill(w, empty: false); w.DemoSettings(demoSettings == "first"); }
         else if (demoPair != null) w.DemoPair(demoPair);
+        else if (args.Contains("--demo-multi")) Demo.Multi(w);
         else if (demo) Demo.Fill(w, empty: args.Contains("--empty"));
         if (snapshot != null)
         {
@@ -77,7 +78,9 @@ static class Program
 /// <summary>--demo: sample items for screenshots and design checks (no network).</summary>
 static class Demo
 {
-    public static void Fill(MainWindow w, bool empty)
+    public static void Multi(MainWindow w) => Fill(w, empty: false, multi: true);
+
+    public static void Fill(MainWindow w, bool empty, bool multi = false)
     {
         var dir = Path.Combine(Path.GetTempPath(), "lan-line-demo");
         Directory.CreateDirectory(dir);
@@ -95,6 +98,17 @@ static class Demo
         var pdf = Path.Combine(dir, "Q4 plan.pdf");
         if (!File.Exists(pdf)) File.WriteAllBytes(pdf, new byte[412_000]);
         if (empty) { w.SetDemo("MacBook Pro", []); return; }
+        if (multi)
+        {
+            w.SetDemoMulti(
+            [
+                (new Item("1", true, "Can you send the new deck?", null, 0, null, ItemState.ReceivedState), "from MacBook Pro"),
+                (new Item("2", false, "Updated deck & icons", null, 0, null, ItemState.Delivered), "to everyone"),
+                (new Item("3", false, null, "hero-export.png", 2_400_000, png, ItemState.Delivered), "to Intel Mac"),
+                (new Item("4", false, null, "Q4 plan.pdf", 412_000, pdf, ItemState.Sent), "to everyone · ✓ 1/2"),
+            ]);
+            return;
+        }
         w.SetDemo("MacBook Pro",
         [
             new Item("1", false, "Can you send the new deck?", null, 0, null, new ItemState(ItemStateKind.Delivered)),
