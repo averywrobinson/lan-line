@@ -4,7 +4,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Win32;
 
-namespace Ferry.App;
+namespace LanLine.App;
 
 /// <summary>
 /// Light/dark palettes (the same values as the Mac app) applied as application-wide brushes,

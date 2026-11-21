@@ -1,5 +1,5 @@
 import Foundation
-import FerryCore
+import LanLineCore
 
 /// `--demo`: sample items for screenshots and design checks (no network).
 @MainActor

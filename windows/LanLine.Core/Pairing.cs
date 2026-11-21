@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 /// <summary>
 /// The code one computer shows and the other types to pair; it doubles as the shared token.

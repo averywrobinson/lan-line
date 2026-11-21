@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FerryCore
+@testable import LanLineCore
 
 /// Thread-safe event log for one Session.
 final class Recorder: @unchecked Sendable {
@@ -35,7 +35,7 @@ final class FakeClock: @unchecked Sendable {
 let testToken = String(repeating: "ab", count: 32)
 
 func tempDir(_ tag: String) -> URL {
-    let d = FileManager.default.temporaryDirectory.appendingPathComponent("ferry-test-\(tag)-\(UUID().uuidString.prefix(6))")
+    let d = FileManager.default.temporaryDirectory.appendingPathComponent("lan-line-test-\(tag)-\(UUID().uuidString.prefix(6))")
     try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
     return d
 }
@@ -83,7 +83,7 @@ func startDialer(_ tag: String, port: UInt16, config: SessionConfig? = nil) -> (
 final class RawClient: @unchecked Sendable {
     let task: URLSessionWebSocketTask
     init(port: UInt16) {
-        task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ferry")!)
+        task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/lan-line")!)
         task.maximumMessageSize = 4 << 20
         task.resume()
     }

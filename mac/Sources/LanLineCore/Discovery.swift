@@ -39,7 +39,7 @@ public enum Discovery {
 
     /// Broadcast a probe and collect answers for `timeout` seconds. `targets` overrides the broadcast
     /// addresses (tests use 127.0.0.1). The completion runs on `queue`.
-    public static func search(port: UInt16 = FerryConfig.defaultPort, timeout: TimeInterval = 1.2,
+    public static func search(port: UInt16 = LanLineConfig.defaultPort, timeout: TimeInterval = 1.2,
                               targets: [String]? = nil, queue: DispatchQueue,
                               completion: @escaping @Sendable ([DiscoveredPeer]) -> Void) {
         let s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
@@ -112,7 +112,7 @@ public enum Discovery {
 public final class DiscoveryResponder: @unchecked Sendable {
     private var source: DispatchSourceRead?
 
-    public init(port: UInt16 = FerryConfig.defaultPort, name: String, pairID: String, queue: DispatchQueue) throws {
+    public init(port: UInt16 = LanLineConfig.defaultPort, name: String, pairID: String, queue: DispatchQueue) throws {
         let s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard s >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
         var one: Int32 = 1

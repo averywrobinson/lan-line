@@ -72,7 +72,7 @@ public enum SessionEvent: Sendable, Equatable {
     case status(String)
 }
 
-/// The one Ferry session object. The window, the headless mode and the tests all drive this.
+/// The one Lan-Line session object. The window, the headless mode and the tests all drive this.
 /// All state lives on `queue`; the handler is called on `queue` too, so a UI must hop to main itself (once).
 public final class Session: @unchecked Sendable {
     public let role: Role
@@ -131,7 +131,7 @@ public final class Session: @unchecked Sendable {
                 clock: @escaping @Sendable () -> Date = { Date() },
                 handler: @escaping @Sendable (SessionEvent) -> Void) {
         self.role = role; self.config = config; self.handler = handler; self.now = clock
-        self.queue = DispatchQueue(label: "ferry.session")
+        self.queue = DispatchQueue(label: "lan-line.session")
     }
 
     // MARK: public API (any thread)

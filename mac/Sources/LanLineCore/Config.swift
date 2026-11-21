@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-public struct FerryConfig: Codable, Sendable, Equatable {
+public struct LanLineConfig: Codable, Sendable, Equatable {
     public var port: UInt16
     public var token: String
     public var hosts: [String]?
@@ -12,7 +12,7 @@ public struct FerryConfig: Codable, Sendable, Equatable {
 
     public static let defaultPort: UInt16 = 47830
 
-    public init(port: UInt16 = FerryConfig.defaultPort, token: String, hosts: [String]? = nil, role: String? = nil, peer: String? = nil) {
+    public init(port: UInt16 = LanLineConfig.defaultPort, token: String, hosts: [String]? = nil, role: String? = nil, peer: String? = nil) {
         self.port = port; self.token = token; self.hosts = hosts; self.role = role; self.peer = peer
     }
 
@@ -23,8 +23,8 @@ public struct FerryConfig: Codable, Sendable, Equatable {
             .appendingPathComponent("Library/Application Support/Lan-Line/config.json")
     }
 
-    public static func load(from url: URL = defaultURL) throws -> FerryConfig {
-        try JSONDecoder().decode(FerryConfig.self, from: Data(contentsOf: url))
+    public static func load(from url: URL = defaultURL) throws -> LanLineConfig {
+        try JSONDecoder().decode(LanLineConfig.self, from: Data(contentsOf: url))
     }
 
     /// Write atomically, readable by this user only (the token is a secret).

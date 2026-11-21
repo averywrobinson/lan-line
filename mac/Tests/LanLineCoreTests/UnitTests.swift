@@ -1,5 +1,5 @@
 import XCTest
-@testable import FerryCore
+@testable import LanLineCore
 
 final class UnitTests: XCTestCase {
     func testSanitize() {
@@ -86,12 +86,12 @@ final class PairingTests: XCTestCase {
 
     func testConfigSaveIsPrivateAndRoundTrips() throws {
         let url = tempDir("cfg").appendingPathComponent("config.json")
-        let c = FerryConfig(token: "ABCDE12345", hosts: ["10.0.0.2"], role: "connect")
+        let c = LanLineConfig(token: "ABCDE12345", hosts: ["10.0.0.2"], role: "connect")
         try c.save(to: url)
-        XCTAssertEqual(try FerryConfig.load(from: url), c)
+        XCTAssertEqual(try LanLineConfig.load(from: url), c)
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(perms, 0o600)
         XCTAssertTrue(c.connects)
-        XCTAssertFalse(FerryConfig(token: "t").connects)
+        XCTAssertFalse(LanLineConfig(token: "t").connects)
     }
 }

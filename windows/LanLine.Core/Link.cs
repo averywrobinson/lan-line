@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 enum LinkEventKind { Ready, Text, Data, Closed }
 

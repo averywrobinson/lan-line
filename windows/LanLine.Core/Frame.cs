@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 /// <summary>One JSON control frame (see PROTOCOL.md). Null fields are left out.</summary>
 public sealed record Frame

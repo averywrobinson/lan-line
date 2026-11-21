@@ -1,12 +1,12 @@
 import Foundation
-import FerryCore
+import LanLineCore
 
 /// `--headless` (optionally `--echo`) and `--selftest`: the same Session the window uses, without a window.
 enum Headless {
     static func run(_ o: Options) -> Never {
         let cfg = o.loadConfig()
         let downloads = o.value("--downloads").map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("ferry-headless-\(getpid())")
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("lan-line-headless-\(getpid())")
         var sc = SessionConfig(token: cfg.token, name: o.name, downloadDir: downloads)
         sc.chunkSize = (o.value("--chunk").flatMap(Int.init) ?? 256) * 1024   // KiB per binary frame
         let state = HeadlessState(selftest: o.flag("--selftest"), echo: o.flag("--echo"),
@@ -37,7 +37,7 @@ final class HeadlessState: @unchecked Sendable {
     var session: Session?
     var testFile: URL?
     var testSha = ""
-    let testText = "ferry selftest \(UUID().uuidString)\nline two ✓"
+    let testText = "lan-line selftest \(UUID().uuidString)\nline two ✓"
     var started = false, gotText = false, gotFile = false
     var connects = 0, disconnects = 0
     var sendText: String?          // --send-text: send once on connect, exit when delivered
@@ -57,7 +57,7 @@ final class HeadlessState: @unchecked Sendable {
     }
 
     func prepareFile() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ferry-selftest-\(getpid())")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lan-line-selftest-\(getpid())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("selftest-\(sizeMB)MB.bin")
         FileManager.default.createFile(atPath: url.path, contents: nil)

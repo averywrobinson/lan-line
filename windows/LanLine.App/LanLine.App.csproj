@@ -10,8 +10,8 @@
     <ApplicationIcon>LanLine.ico</ApplicationIcon>
     <Product>Lan-Line</Product>
     <AssemblyTitle>Lan-Line</AssemblyTitle>
-    <RootNamespace>Ferry.App</RootNamespace>
-    <StartupObject>Ferry.App.Program</StartupObject>
+    <RootNamespace>LanLine.App</RootNamespace>
+    <StartupObject>LanLine.App.Program</StartupObject>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>0.9.0</Version>
     <InformationalVersion>0.9.0-beta.1</InformationalVersion>
@@ -21,6 +21,6 @@
     <Resource Include="LanLine.ico" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Ferry.Core\Ferry.Core.csproj" />
+    <ProjectReference Include="..\LanLine.Core\LanLine.Core.csproj" />
   </ItemGroup>
 </Project>

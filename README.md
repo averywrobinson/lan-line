@@ -84,8 +84,8 @@ Everything stays on your network: no servers, no accounts, no analytics or telem
 Each pair of computers keeps one WebSocket connection. Text and file metadata are small JSON messages; files stream in 256 KiB chunks and are verified with SHA-256 before they appear. Computers find each other with a UDP broadcast on port 47830. Details: [PROTOCOL.md](PROTOCOL.md).
 
 ```
-mac/       Swift 6 (SwiftPM): FerryCore library, LanLine app (AppKit + SwiftUI), XCTest
-windows/   .NET 10: Ferry.Core, Ferry.App (WPF), Ferry.Tests, installer/ (Inno Setup)
+mac/       Swift 6 (SwiftPM): LanLineCore library, LanLine app (AppKit + SwiftUI), XCTest
+windows/   .NET 10: LanLine.Core, LanLine.App (WPF), LanLine.Tests, installer/ (Inno Setup)
 site/      the website (static HTML)
 ```
 
@@ -101,11 +101,11 @@ cd mac && swift test && ./build-app.sh     # builds and installs ~/Applications/
 **Windows** (.NET 10 SDK):
 
 ```bash
-dotnet run --project windows/Ferry.Tests -c Release   # tests
-dotnet run --project windows/Ferry.App                 # the app
+dotnet run --project windows/LanLine.Tests -c Release   # tests
+dotnet run --project windows/LanLine.App                 # the app
 ```
 
-Installer: `dotnet publish windows/Ferry.App -c Release -r win-x64 --self-contained true -o windows/publish-sc`, then `ISCC windows/installer/LanLine.iss` (Inno Setup 7).
+Installer: `dotnet publish windows/LanLine.App -c Release -r win-x64 --self-contained true -o windows/publish-sc`, then `ISCC windows/installer/LanLine.iss` (Inno Setup 7).
 
 ## Feedback
 

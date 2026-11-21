@@ -1,5 +1,5 @@
 ; Lan-Line Windows installer (Inno Setup 7). From the repo root:
-;   dotnet publish windows/Ferry.App -c Release -r win-x64 --self-contained true -o windows/publish-sc
+;   dotnet publish windows/LanLine.App -c Release -r win-x64 --self-contained true -o windows/publish-sc
 ;   ISCC windows/installer/LanLine.iss            -> dist/Lan-Line-<version>-windows-setup.exe
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
@@ -35,7 +35,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 WizardStyle=modern
 WizardSizePercent=100
-SetupIconFile=..\Ferry.App\LanLine.ico
+SetupIconFile=..\LanLine.App\LanLine.ico
 UninstallDisplayIcon={app}\Lan-Line.exe
 UninstallDisplayName=Lan-Line
 LicenseFile={#LicensePath}

@@ -1,5 +1,5 @@
 import XCTest
-@testable import FerryCore
+@testable import LanLineCore
 
 final class WebSocketTests: XCTestCase {
     func testAcceptKeyRFCExample() {

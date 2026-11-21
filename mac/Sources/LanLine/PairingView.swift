@@ -1,5 +1,5 @@
 import SwiftUI
-import FerryCore
+import LanLineCore
 
 /// First run (and "Pair with Another Computer…"): show a code here, or type the other computer's code.
 struct PairingView: View {

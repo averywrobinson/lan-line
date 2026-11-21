@@ -1,5 +1,5 @@
 import Foundation
-import FerryCore
+import LanLineCore
 
 struct Options: Sendable {
     let args: [String]
@@ -11,19 +11,19 @@ struct Options: Sendable {
         return args[i + 1]
     }
 
-    var configURL: URL { value("--config").map { URL(fileURLWithPath: $0) } ?? FerryConfig.defaultURL }
+    var configURL: URL { value("--config").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.defaultURL }
 
-    func loadConfig() -> FerryConfig {
+    func loadConfig() -> LanLineConfig {
         let url = configURL
-        do { return try FerryConfig.load(from: url) } catch {
-            FileHandle.standardError.write(Data("ferry: cannot read config \(url.path): \(error.localizedDescription)\n".utf8))
+        do { return try LanLineConfig.load(from: url) } catch {
+            FileHandle.standardError.write(Data("lan-line: cannot read config \(url.path): \(error.localizedDescription)\n".utf8))
             exit(2)
         }
     }
 
     var name: String { value("--name") ?? (Host.current().localizedName ?? "Mac") }
 
-    func role(_ cfg: FerryConfig) -> Role {
+    func role(_ cfg: LanLineConfig) -> Role {
         let port = value("--port").flatMap(UInt16.init) ?? cfg.port
         if let hosts = value("--connect") {
             return .dialer(hosts: hosts.split(separator: ",").map(String.init), port: port)

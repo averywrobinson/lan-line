@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import FerryCore
+import LanLineCore
 
 /// Owns the panel and the one Session. Everything here runs on the main thread.
 @MainActor
@@ -47,13 +47,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: session and pairing
 
-    private var config: FerryConfig?          // the saved pairing, if any
-    private var pending: FerryConfig?         // a pairing being tried, saved once it connects
+    private var config: LanLineConfig?          // the saved pairing, if any
+    private var pending: LanLineConfig?         // a pairing being tried, saved once it connects
     private var responder: DiscoveryResponder?
     private var pairTimeout: DispatchWorkItem?
     private var rediscover: Timer?
 
-    private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? config?.port ?? FerryConfig.defaultPort }
+    private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? config?.port ?? LanLineConfig.defaultPort }
 
     private func boot() {
         model.myName = options.name
@@ -62,13 +62,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             search: { [weak self] in self?.search() },
             connect: { [weak self] in self?.tryConnect() },
             cancel: { [weak self] in if let c = self?.config { self?.run(c) } })
-        if let c = try? FerryConfig.load(from: options.configURL) { run(c) }
+        if let c = try? LanLineConfig.load(from: options.configURL) { run(c) }
         else if options.value("--connect") != nil { run(options.loadConfig()) }   // flags win; loadConfig explains a bad path
         else { beginPairing(.show) }
     }
 
     /// Normal operation with a saved pairing.
-    private func run(_ cfg: FerryConfig) {
+    private func run(_ cfg: LanLineConfig) {
         stopAll()
         config = cfg
         model.pairing = false
@@ -85,9 +85,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func startSession(_ cfg: FerryConfig) {
+    private func startSession(_ cfg: LanLineConfig) {
         let sc = SessionConfig(token: cfg.token, name: options.name,
-                               downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? FerryConfig.downloadsDir)
+                               downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir)
         // The one main-thread hop: the Session calls this on its own queue.
         let s = Session(role: options.role(cfg), config: sc) { [weak self] event in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(event) } }
@@ -117,7 +117,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func save(_ c: FerryConfig) {
+    private func save(_ c: LanLineConfig) {
         do { try c.save(to: options.configURL) } catch { model.note("Couldn't save the pairing: \(error.localizedDescription)") }
     }
 
@@ -146,7 +146,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let code = PairCode.generate()
             model.pairCode = code
             model.myAddresses = Discovery.localAddresses()
-            let cfg = FerryConfig(port: port, token: code, role: "listen")
+            let cfg = LanLineConfig(port: port, token: code, role: "listen")
             pending = cfg
             startSession(cfg)
             do { responder = try DiscoveryResponder(port: port, name: options.name, pairID: PairCode.pairID(token: code), queue: .main) }
@@ -177,7 +177,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stopAll()
         model.pairError = nil
         model.pairBusy = true
-        let cfg = FerryConfig(port: port, token: code, hosts: [host], role: "connect")
+        let cfg = LanLineConfig(port: port, token: code, hosts: [host], role: "connect")
         pending = cfg
         startSession(cfg)
         let t = DispatchWorkItem { [weak self] in

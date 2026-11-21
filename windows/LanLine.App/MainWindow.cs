@@ -9,9 +9,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Shell;
-using Ferry.Core;
+using LanLine.Core;
 
-namespace Ferry.App;
+namespace LanLine.App;
 
 /// <summary>The Lan-Line window: a thin view over one Session. Everything here runs on the UI thread.</summary>
 sealed partial class MainWindow : Window
@@ -152,8 +152,12 @@ sealed partial class MainWindow : Window
         root.Children.Add(header);
         root.Children.Add(hairline);
         root.Children.Add(composer);
-        root.Children.Add(body);
-        root.Children.Add(_pairPanel);   // shown instead of the feed and composer while pairing
+        // The DockPanel's last child fills the rest of the window: the feed and the pairing panel share it
+        // (only one is visible). Adding them as two children would dock the feed left at its content width.
+        var center = new Grid();
+        center.Children.Add(body);
+        center.Children.Add(_pairPanel);   // shown instead of the feed and composer while pairing
+        root.Children.Add(center);
         var layers = new Grid();
         layers.Children.Add(root);
         layers.Children.Add(_dropOverlay);

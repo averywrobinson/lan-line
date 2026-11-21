@@ -1,6 +1,6 @@
 # Lan-Line wire protocol, v1
 
-Transport: one WebSocket per paired computers. The computer that showed the pairing code listens on `ws://0.0.0.0:47830/lan-line`; the other dials it at the addresses saved when they paired. The path is informational: the listener accepts any path. Plain RFC 6455 WebSockets with no extensions or subprotocols; the Mac app implements the framing itself on BSD sockets (`mac/Sources/FerryCore/WebSocket.swift`), the Windows app uses .NET's `System.Net.WebSockets`.
+Transport: one WebSocket per paired computers. The computer that showed the pairing code listens on `ws://0.0.0.0:47830/lan-line`; the other dials it at the addresses saved when they paired. The path is informational: the listener accepts any path. Plain RFC 6455 WebSockets with no extensions or subprotocols; the Mac app implements the framing itself on BSD sockets (`mac/Sources/LanLineCore/WebSocket.swift`), the Windows app uses .NET's `System.Net.WebSockets`.
 
 Control messages are UTF-8 JSON **text frames** with a `type` field. File bytes travel as **binary frames** (at most 256 KiB each) between `file_begin` and `file_end`.
 

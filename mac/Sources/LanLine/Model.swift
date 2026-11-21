@@ -1,5 +1,5 @@
 import AppKit
-import FerryCore
+import LanLineCore
 import Observation
 
 /// One feed row: an item (text or file, either direction) or a small note.

@@ -1,7 +1,7 @@
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 public abstract record Role
 {
@@ -62,7 +62,7 @@ public abstract record SessionEvent
 }
 
 /// <summary>
-/// The one Ferry session object; the window, the headless modes and the tests all drive it.
+/// The one Lan-Line session object; the window, the headless modes and the tests all drive it.
 /// All state lives on one SerialQueue thread, and the handler is called there too:
 /// a UI must hop to its own thread in one place.
 /// </summary>
@@ -70,7 +70,7 @@ public sealed class Session : IDisposable
 {
     public Role Role { get; }
     public SessionConfig Config { get; }
-    readonly SerialQueue _q = new("ferry.session");
+    readonly SerialQueue _q = new("lan-line.session");
     readonly Action<SessionEvent> _handler;
     readonly Func<DateTime> _now;
 

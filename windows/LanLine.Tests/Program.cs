@@ -1,11 +1,11 @@
-// Ferry.Tests: a plain console test runner (no NuGet). `dotnet run --project Ferry.Tests` runs every test;
-// `... -- headless|selftest <options>` runs the shared headless modes instead (same as Ferry.exe --headless).
+// LanLine.Tests: a plain console test runner (no NuGet). `dotnet run --project LanLine.Tests` runs every test;
+// `... -- headless|selftest <options>` runs the shared headless modes instead (same as Lan-Line.exe --headless).
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
-using Ferry.Core;
+using LanLine.Core;
 
 if (args.Length > 0 && (args[0] == "headless" || args[0] == "selftest"))
     return Headless.Run(["--" + args[0], .. args[1..]]);
@@ -16,7 +16,7 @@ if (args.Length >= 3 && args[0] == "tcpread")   // diagnostics: read a raw TCP s
     await tc.ConnectAsync(args[1], int.Parse(args[2]));
     var st = tc.GetStream();
     if (args.Length == 4 && args[3] == "upgrade")   // look like a WebSocket client first
-        await st.WriteAsync(Encoding.ASCII.GetBytes($"GET /ferry HTTP/1.1\r\nHost: {args[1]}:{args[2]}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")); var b = new byte[1 << 16]; long n = 0; var w = Stopwatch.StartNew(); int k;
+        await st.WriteAsync(Encoding.ASCII.GetBytes($"GET /lan-line HTTP/1.1\r\nHost: {args[1]}:{args[2]}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")); var b = new byte[1 << 16]; long n = 0; var w = Stopwatch.StartNew(); int k;
     while ((k = await st.ReadAsync(b)) > 0) n += k;
     Console.WriteLine($"tcpread {n} bytes in {w.Elapsed.TotalSeconds:0.000} s = {n / w.Elapsed.TotalSeconds / 1e6:0.0} MB/s");
     return 0;
@@ -88,7 +88,7 @@ sealed class RawClient : IDisposable
     public static async Task<RawClient> Connect(int port)
     {
         var c = new RawClient();
-        await c._ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ferry"), CancellationToken.None);
+        await c._ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/lan-line"), CancellationToken.None);
         return c;
     }
     public Task Send(Frame f) => _ws.SendAsync(Encoding.UTF8.GetBytes(f.Json), WebSocketMessageType.Text, true, CancellationToken.None);
@@ -131,7 +131,7 @@ static class H
 
     public static string TempDir(string tag)
     {
-        var d = Path.Combine(Path.GetTempPath(), $"ferry-test-{tag}-{Guid.NewGuid().ToString("N")[..6]}");
+        var d = Path.Combine(Path.GetTempPath(), $"lan-line-test-{tag}-{Guid.NewGuid().ToString("N")[..6]}");
         Directory.CreateDirectory(d);
         return d;
     }
@@ -541,11 +541,11 @@ static class T
     {
         var dir = Path.Combine(Path.GetTempPath(), "lanline-cfg-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(dir, "config.json");
-        new FerryConfig { Token = "ABCDE12345", Hosts = ["10.0.0.2"], Role = "listen", Peer = "Mac" }.Save(path);
-        var c = FerryConfig.Load(path);
+        new LanLineConfig { Token = "ABCDE12345", Hosts = ["10.0.0.2"], Role = "listen", Peer = "Mac" }.Save(path);
+        var c = LanLineConfig.Load(path);
         H.Eq("ABCDE12345", c.Token, "token"); H.Eq("10.0.0.2", c.Hosts.Single(), "hosts"); H.True(c.Listens, "listens"); H.Eq("Mac", c.Peer, "peer");
-        H.True(!new FerryConfig().Listens, "default connects");
-        H.Eq(0, new FerryConfig().Hosts.Length, "no built-in hosts");
+        H.True(!new LanLineConfig().Listens, "default connects");
+        H.Eq(0, new LanLineConfig().Hosts.Length, "no built-in hosts");
         Directory.Delete(dir, true);
         return Task.CompletedTask;
     }

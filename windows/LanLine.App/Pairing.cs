@@ -3,17 +3,17 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
-using Ferry.Core;
+using LanLine.Core;
 
-namespace Ferry.App;
+namespace LanLine.App;
 
 /// <summary>First run and "Pair with another computer": show a code here, or type the other computer's code.</summary>
 sealed partial class MainWindow
 {
     string[] _args = [];
     bool _pairing, _showMode, _pairBusy, _searching;
-    FerryConfig? _config;    // the saved pairing, if any
-    FerryConfig? _pending;   // a pairing being tried, saved once it connects
+    LanLineConfig? _config;    // the saved pairing, if any
+    LanLineConfig? _pending;   // a pairing being tried, saved once it connects
     DiscoveryResponder? _responder;
     DispatcherTimer? _pairTimeout, _rediscover;
     string _code = "";
@@ -33,21 +33,21 @@ sealed partial class MainWindow
     readonly Button _cancelLink = new() { Content = "Cancel" }, _switchLink = new();
 
     int Port => int.TryParse(Arg(_args, "--port"), out var p) ? p : _config?.Port ?? 47830;
-    string ConfigPath => Arg(_args, "--config") ?? FerryConfig.DefaultPath;
+    string ConfigPath => Arg(_args, "--config") ?? LanLineConfig.DefaultPath;
     static string MyName => Environment.MachineName;
 
     void Boot()
     {
-        FerryConfig? cfg = null;
-        try { cfg = FerryConfig.Load(ConfigPath); } catch (Exception) { }
+        LanLineConfig? cfg = null;
+        try { cfg = LanLineConfig.Load(ConfigPath); } catch (Exception) { }
         if (cfg != null || Arg(_args, "--connect") != null || _args.Contains("--listen"))
-            Run(cfg ?? new FerryConfig());
+            Run(cfg ?? new LanLineConfig());
         else
             BeginPairing(show: false);   // a PC types the code by default; it can switch
     }
 
     /// <summary>Normal operation with a saved pairing.</summary>
-    void Run(FerryConfig cfg)
+    void Run(LanLineConfig cfg)
     {
         StopAll();
         _config = cfg;
@@ -66,12 +66,12 @@ sealed partial class MainWindow
         RefreshStatus();
     }
 
-    bool Listens(FerryConfig cfg) => _args.Contains("--listen") || (Arg(_args, "--connect") == null && cfg.Listens);
+    bool Listens(LanLineConfig cfg) => _args.Contains("--listen") || (Arg(_args, "--connect") == null && cfg.Listens);
 
-    void StartSession(FerryConfig cfg)
+    void StartSession(LanLineConfig cfg)
     {
         Role role = Listens(cfg) ? new Role.Listen(Port) : new Role.Dial(Arg(_args, "--connect")?.Split(',') ?? cfg.Hosts, Port);
-        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? FerryConfig.DownloadsDir };
+        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir };
         // The one UI-thread hop: the Session calls this on its own queue thread.
         _session = new Session(role, config, e => Dispatcher.BeginInvoke(() => Handle(e)));
         _session.Start();
@@ -104,7 +104,7 @@ sealed partial class MainWindow
         }
     }
 
-    void Save(FerryConfig c)
+    void Save(LanLineConfig c)
     {
         try { c.Save(ConfigPath); } catch (Exception e) { Note($"Couldn't save the pairing: {e.Message}"); }
     }
@@ -136,7 +136,7 @@ sealed partial class MainWindow
         if (show)
         {
             _code = PairCode.Generate();
-            var cfg = new FerryConfig { Port = Port, Token = _code, Role = "listen" };
+            var cfg = new LanLineConfig { Port = Port, Token = _code, Role = "listen" };
             _pending = cfg;
             StartSession(cfg);
             TryRespond(_code);
@@ -162,7 +162,7 @@ sealed partial class MainWindow
         StopAll();
         HidePairError();
         _pairBusy = true;
-        var cfg = new FerryConfig { Port = Port, Token = code, Hosts = [host], Role = "connect" };
+        var cfg = new LanLineConfig { Port = Port, Token = code, Hosts = [host], Role = "connect" };
         _pending = cfg;
         StartSession(cfg);
         _pairTimeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };

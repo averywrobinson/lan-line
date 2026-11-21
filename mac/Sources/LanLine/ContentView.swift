@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import ImageIO
-import FerryCore
+import LanLineCore
 
 struct ContentView: View {
     @Bindable var model: AppModel

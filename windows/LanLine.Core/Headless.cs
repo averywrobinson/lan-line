@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 /// <summary>
-/// --headless [--echo] / --selftest / --send-text T / --send-file P, shared by Ferry.exe and Ferry.Tests.
+/// --headless [--echo] / --selftest / --send-text T / --send-file P, shared by Lan-Line.exe and LanLine.Tests.
 /// Options: --listen | --connect HOST[,HOST]  --port N  --bind HOST  --config PATH  --downloads DIR  --name NAME
 ///          --size MB (selftest, default 50)  --timeout S (selftest, default 180)  --duration S (headless)
 /// Prints one JSON object per line. Returns the process exit code.
@@ -18,13 +18,13 @@ public static class Headless
     public static int Run(string[] args)
     {
         if (args.Contains("--discover") || args.Contains("--respond")) return Discover(args);
-        FerryConfig cfg;
-        try { cfg = FerryConfig.Load(Val(args, "--config")); }
-        catch (Exception e) { Console.Error.WriteLine($"ferry: cannot read config: {e.Message}"); return 2; }
+        LanLineConfig cfg;
+        try { cfg = LanLineConfig.Load(Val(args, "--config")); }
+        catch (Exception e) { Console.Error.WriteLine($"lan-line: cannot read config: {e.Message}"); return 2; }
         var port = int.TryParse(Val(args, "--port"), out var p) ? p : cfg.Port;
         Role role = args.Contains("--listen") ? new Role.Listen(port, Val(args, "--bind"))
             : new Role.Dial(Val(args, "--connect")?.Split(',') ?? cfg.Hosts, port);
-        var downloads = Val(args, "--downloads") ?? Path.Combine(Path.GetTempPath(), $"ferry-headless-{Environment.ProcessId}");
+        var downloads = Val(args, "--downloads") ?? Path.Combine(Path.GetTempPath(), $"lan-line-headless-{Environment.ProcessId}");
         var selftest = args.Contains("--selftest");
         var echo = args.Contains("--echo");
         var sizeMb = int.TryParse(Val(args, "--size"), out var mb) ? mb : 50;
@@ -39,10 +39,10 @@ public static class Headless
         }
 
         string? testFile = null, testSha = null;
-        var testText = $"ferry selftest {Guid.NewGuid()}\nline two ✓";
+        var testText = $"lan-line selftest {Guid.NewGuid()}\nline two ✓";
         if (selftest)
         {
-            var dir = Path.Combine(Path.GetTempPath(), $"ferry-selftest-{Environment.ProcessId}");
+            var dir = Path.Combine(Path.GetTempPath(), $"lan-line-selftest-{Environment.ProcessId}");
             Directory.CreateDirectory(dir);
             testFile = Path.Combine(dir, $"selftest-{sizeMb}MB.bin");
             using (var fs = File.Create(testFile))

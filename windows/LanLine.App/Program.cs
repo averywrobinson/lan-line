@@ -3,9 +3,9 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using Ferry.Core;
+using LanLine.Core;
 
-namespace Ferry.App;
+namespace LanLine.App;
 
 static class Program
 {
@@ -38,7 +38,11 @@ static class Program
         var w = new MainWindow(args, demo);
         if (demoPair != null) w.DemoPair(demoPair);
         else if (demo) Demo.Fill(w, empty: args.Contains("--empty"));
-        if (snapshot != null) return Snapshot(w, snapshot);
+        if (snapshot != null)
+        {
+            if (Arg(args, "--snapshot-size")?.Split('x') is [var sw, var sh] && double.TryParse(sw, out var ww) && double.TryParse(sh, out var hh)) { w.Width = ww; w.Height = hh; }
+            return Snapshot(w, snapshot);
+        }
         Theme.Follow(app, w.ThemeChanged);
         return app.Run(w);
     }

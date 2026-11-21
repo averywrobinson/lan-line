@@ -7,9 +7,9 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
-using Ferry.Core;
+using LanLine.Core;
 
-namespace Ferry.App;
+namespace LanLine.App;
 
 /// <summary>One feed entry: a text bubble or a file card. Ours sit on the right, received ones on the left (blue tint).</summary>
 sealed class ItemRow

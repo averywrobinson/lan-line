@@ -1,6 +1,6 @@
 import XCTest
 import CryptoKit
-@testable import FerryCore
+@testable import LanLineCore
 
 final class SessionTests: XCTestCase {
 

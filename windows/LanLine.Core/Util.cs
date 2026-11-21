@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace Ferry.Core;
+namespace LanLine.Core;
 
 public static class Names
 {
@@ -72,7 +72,7 @@ public static class Hashing
     }
 }
 
-public sealed class FerryConfig
+public sealed class LanLineConfig
 {
     [System.Text.Json.Serialization.JsonPropertyName("port")] public int Port { get; set; } = 47830;
     [System.Text.Json.Serialization.JsonPropertyName("token")] public string Token { get; set; } = "";
@@ -87,8 +87,8 @@ public sealed class FerryConfig
     public static string DefaultPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Lan-Line", "config.json");
 
-    public static FerryConfig Load(string? path = null) =>
-        JsonSerializer.Deserialize<FerryConfig>(File.ReadAllText(path ?? DefaultPath))
+    public static LanLineConfig Load(string? path = null) =>
+        JsonSerializer.Deserialize<LanLineConfig>(File.ReadAllText(path ?? DefaultPath))
         ?? throw new InvalidDataException("empty config");
 
     /// <summary>Write atomically next to the target, then replace it. %APPDATA% is already private to the user.</summary>
@@ -124,7 +124,7 @@ public sealed class SerialQueue : IDisposable
         foreach (var a in _q.GetConsumingEnumerable())
         {
             try { a(); }
-            catch (Exception e) { Console.Error.WriteLine($"ferry: queue action failed: {e}"); }
+            catch (Exception e) { Console.Error.WriteLine($"lan-line: queue action failed: {e}"); }
         }
     }
 

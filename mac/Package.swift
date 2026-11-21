@@ -5,12 +5,12 @@ let package = Package(
     name: "LanLine",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "FerryCore", targets: ["FerryCore"]),
+        .library(name: "LanLineCore", targets: ["LanLineCore"]),
         .executable(name: "LanLine", targets: ["LanLine"]),
     ],
     targets: [
-        .target(name: "FerryCore"),
-        .executableTarget(name: "LanLine", dependencies: ["FerryCore"]),
-        .testTarget(name: "FerryCoreTests", dependencies: ["FerryCore"]),
+        .target(name: "LanLineCore"),
+        .executableTarget(name: "LanLine", dependencies: ["LanLineCore"]),
+        .testTarget(name: "LanLineCoreTests", dependencies: ["LanLineCore"]),
     ]
 )

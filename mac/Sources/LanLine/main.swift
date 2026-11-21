@@ -1,5 +1,5 @@
 import AppKit
-import FerryCore
+import LanLineCore
 
 // Lan-Line entry point.
 //   Lan-Line                        the window (listens on the config port)
@@ -13,7 +13,7 @@ import FerryCore
 let options = Options(CommandLine.arguments.dropFirst())
 
 if options.flag("--discover") {
-    let port = options.value("--port").flatMap(UInt16.init) ?? FerryConfig.defaultPort
+    let port = options.value("--port").flatMap(UInt16.init) ?? LanLineConfig.defaultPort
     Discovery.search(port: port, timeout: 2, queue: .main) { peers in
         for p in peers { print("{\"found\":\"\(p.name)\",\"host\":\"\(p.host)\",\"port\":\(p.port),\"pair\":\"\(p.pairID)\"}") }
         print("{\"event\":\"discover_done\",\"count\":\(peers.count)}")
@@ -22,7 +22,7 @@ if options.flag("--discover") {
     dispatchMain()
 }
 if let code = options.value("--respond") {
-    let port = options.value("--port").flatMap(UInt16.init) ?? FerryConfig.defaultPort
+    let port = options.value("--port").flatMap(UInt16.init) ?? LanLineConfig.defaultPort
     let r = try DiscoveryResponder(port: port, name: options.name, pairID: PairCode.pairID(token: code), queue: .main)
     print("{\"event\":\"responding\",\"pair\":\"\(PairCode.pairID(token: code))\"}")
     withExtendedLifetime(r) { dispatchMain() }
