@@ -4,7 +4,7 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.1"
+#define AppVersionFull "0.9.0-beta.2"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif
@@ -43,7 +43,8 @@ OutputDir={#OutDir}
 OutputBaseFilename=Lan-Line-{#AppVersionFull}-windows-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
-AppMutex=Local\Lan-Line.SingleInstance
+; No AppMutex: Inno would only say "please close Lan-Line" (and cancel when silent).
+; [Code] below closes the running app politely instead, for both setup and uninstall.
 CloseApplications=yes
 
 [Tasks]
@@ -65,3 +66,43 @@ Filename: "{app}\Lan-Line.exe"; Description: "Open Lan-Line"; Flags: nowait post
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+const
+  AppMutexName = 'Local\Lan-Line.SingleInstance';
+
+// Ask a running Lan-Line to close (WM_CLOSE via taskkill without /F) and wait up to 10 s for it to go.
+function CloseRunningLanLine(Silent: Boolean; const Verb: String): Boolean;
+var
+  Code, I: Integer;
+begin
+  Result := True;
+  if not CheckForMutexes(AppMutexName) then Exit;
+  if not Silent then
+    if SuppressibleMsgBox('Lan-Line is running. It will be closed so ' + Verb + ' can continue.',
+         mbInformation, MB_OKCANCEL, IDOK) <> IDOK then
+    begin
+      Result := False;
+      Exit;
+    end;
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM Lan-Line.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  for I := 1 to 40 do
+  begin
+    if not CheckForMutexes(AppMutexName) then Exit;
+    Sleep(250);
+  end;
+  Result := not CheckForMutexes(AppMutexName);
+  if not Result then
+    SuppressibleMsgBox('Lan-Line did not close. Close it from its window, then run ' + Verb + ' again.',
+      mbError, MB_OK, IDOK);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := CloseRunningLanLine(WizardSilent(), 'setup');
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := CloseRunningLanLine(UninstallSilent(), 'uninstall');
+end;

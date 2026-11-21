@@ -68,10 +68,10 @@ sealed partial class MainWindow
 
     bool Listens(LanLineConfig cfg) => _args.Contains("--listen") || (Arg(_args, "--connect") == null && cfg.Listens);
 
-    void StartSession(LanLineConfig cfg)
+    void StartSession(LanLineConfig cfg, bool pairing = false)
     {
         Role role = Listens(cfg) ? new Role.Listen(Port) : new Role.Dial(Arg(_args, "--connect")?.Split(',') ?? cfg.Hosts, Port);
-        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir };
+        var config = new SessionConfig { Token = cfg.Token, Name = MyName, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, RekeyOnPair = pairing && Listens(cfg) };
         // The one UI-thread hop: the Session calls this on its own queue thread.
         _session = new Session(role, config, e => Dispatcher.BeginInvoke(() => Handle(e)));
         _session.Start();
@@ -95,13 +95,20 @@ sealed partial class MainWindow
             _config = p;
             _pairBusy = false;
             SetPairing(false);
-            if (p.Listens && _responder == null) TryRespond(p.Token);
+            if (p.Listens) { _responder?.Dispose(); _responder = null; TryRespond(p.Token); }   // advertise the new pair id
         }
         else if (_config is { } c && c.Peer != name)
         {
             c.Peer = name;
             Save(c);
         }
+    }
+
+    /// <summary>The pairing code was swapped for a long-term secret: keep it (saved with the pairing, or now).</summary>
+    void Rekeyed(string token)
+    {
+        if (_pending is { } p) p.Token = token;
+        else if (_config is { } c) { c.Token = token; Save(c); }
     }
 
     void Save(LanLineConfig c)
@@ -138,7 +145,7 @@ sealed partial class MainWindow
             _code = PairCode.Generate();
             var cfg = new LanLineConfig { Port = Port, Token = _code, Role = "listen" };
             _pending = cfg;
-            StartSession(cfg);
+            StartSession(cfg, pairing: true);
             TryRespond(_code);
         }
         else _ = Search();

@@ -115,11 +115,12 @@ public static class Headless
                     break;
                 case SessionEvent.Error err: Log("error", new() { ["message"] = err.Message }); break;
                 case SessionEvent.Status st: Log("status", new() { ["text"] = st.Text }); break;
+                case SessionEvent.Rekeyed: Log("rekeyed", new()); break;
             }
         }
 
         var name = Val(args, "--name") ?? Environment.MachineName;
-        session = new Session(role, new SessionConfig { Token = cfg.Token, Name = name, DownloadDir = downloads }, Handle);
+        session = new Session(role, new SessionConfig { RekeyOnPair = args.Contains("--rekey-on-pair"), Token = cfg.Token, Name = name, DownloadDir = downloads }, Handle);
         Log("start", new() { ["mode"] = selftest ? "selftest" : echo ? "echo" : "headless", ["downloads"] = downloads });
         if (selftest)
         {

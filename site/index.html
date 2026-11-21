@@ -1170,7 +1170,7 @@
 
           <!-- Download Buttons wired directly to GitHub Releases + interactive modal -->
           <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-8">
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.2/Lan-Line-0.9.0-beta.2-mac.dmg"
                onclick="openDownloadModal('macOS')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-8px_rgba(248,250,252,0.2)] active:scale-[0.985] transition-all">
               <!-- Minimal Apple icon -->
@@ -1180,7 +1180,7 @@
               <span>Download for macOS</span>
             </a>
 
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.2/Lan-Line-0.9.0-beta.2-windows-setup.exe"
                onclick="openDownloadModal('Windows')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#F8FAFC] bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.13] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] active:scale-[0.985] transition-all">
               <!-- Minimal Windows 4-pane grid icon -->
@@ -1462,7 +1462,7 @@
         </div>
         <div>
           <h3 id="modalTitle" class="text-[16px] font-semibold text-[#F8FAFC]">Lan-Line for macOS</h3>
-          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.1 · macOS 14+ · Apple Silicon</p>
+          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.2 · macOS 14+ · Apple Silicon</p>
         </div>
       </div>
 
@@ -1483,7 +1483,7 @@
           <button type="button" id="copyReleaseUrlBtn" onclick="copyModalReleaseUrl()" class="font-mono text-[10.5px] text-sky-300 hover:text-sky-200">Copy URL</button>
         </div>
         <p id="modalReleaseUrl" class="font-mono text-[11px] text-[#CBD5E1] break-all leading-relaxed">
-          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg
+          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.2/Lan-Line-0.9.0-beta.2-mac.dmg
         </p>
         <p class="text-[11.5px] text-[#64748B] mt-1.5">
           <span id="modalFirstOpen">Beta builds aren’t code-signed yet; the first open asks for a one-time OK.</span>
@@ -2211,14 +2211,14 @@
       const INSTALLER_META = {
         macOS: {
           title: 'Lan-Line for macOS',
-          subtitle: 'v0.9.0-beta.1 · macOS 14+ · Apple Silicon · 2.6 MB DMG',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg',
+          subtitle: 'v0.9.0-beta.2 · macOS 14+ · Apple Silicon · 2.6 MB DMG',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.2/Lan-Line-0.9.0-beta.2-mac.dmg',
           firstOpen: 'Open the DMG and drag Lan-Line to Applications. First open: click Done, then System Settings → Privacy & Security → Open Anyway.',
         },
         Windows: {
           title: 'Lan-Line for Windows',
-          subtitle: 'v0.9.0-beta.1 · Windows 10/11 (x64) · 43 MB setup',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe',
+          subtitle: 'v0.9.0-beta.2 · Windows 10/11 (x64) · 43 MB setup',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.2/Lan-Line-0.9.0-beta.2-windows-setup.exe',
           firstOpen: 'Run the setup (no admin needed). If SmartScreen appears, choose More info → Run anyway.',
         },
       };

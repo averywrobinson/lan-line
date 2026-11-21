@@ -25,7 +25,7 @@ struct ContentView: View {
             for prov in providers {
                 _ = prov.loadObject(ofClass: URL.self) { url, _ in
                     guard let url else { return }
-                    Task { @MainActor in model.sendFiles([url]) }
+                    Task { @MainActor in model.sendFiles([url], fromDrop: true) }
                 }
             }
             return true
@@ -158,7 +158,7 @@ private struct RowView: View {
                 if !item.incoming { Spacer(minLength: 44) }
                 switch item.kind {
                 case .text(let t): TextBubble(item: item, text: t)
-                case .file(let name, let size, let url): FileCard(item: item, name: name, size: size, url: url)
+                case .file(let name, let size, let url): FileCard(item: item, name: name, size: size, url: url, model: model)
                 }
                 if item.incoming { Spacer(minLength: 44) }
             }
@@ -255,6 +255,7 @@ private struct FileCard: View {
     let name: String
     let size: Int64
     let url: URL
+    let model: AppModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -292,7 +293,7 @@ private struct FileCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
-        .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+        .onDrag { model.chipDragAt = Date(); return NSItemProvider(contentsOf: url) ?? NSItemProvider() }
         .contextMenu {
             Button("Open") { NSWorkspace.shared.open(url) }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }

@@ -325,3 +325,44 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(srv.isConnected)
     }
 }
+
+final class RekeyTests: XCTestCase {
+    private func rekeys(_ r: Recorder) -> [String] { r.all.compactMap { if case .rekeyed(let t) = $0 { return t }; return nil } }
+
+    /// Pairing: the dialer presents the short code; both sides switch to the same fresh 64-hex secret.
+    func testPairingCodeIsSwappedForLongSecret() async throws {
+        var lc = makeConfig("rk-l"); lc.token = "ABCDE12345"; lc.rekeyOnPair = true
+        let (srv, srec, port) = await startListener("rk-l", config: lc)
+        defer { srv.stop() }
+        var dc = makeConfig("rk-d"); dc.token = "ABCDE12345"
+        let drec = Recorder()
+        let dialer = Session(role: .dialer(hosts: ["127.0.0.1"], port: port), config: dc) { drec.add($0) }
+        dialer.start()
+        defer { dialer.stop() }
+        await waitUntil(5, "connected") { drec.connectedCount == 1 && srec.connectedCount == 1 }
+        XCTAssertEqual(rekeys(srec).count, 1)
+        XCTAssertEqual(rekeys(srec), rekeys(drec))
+        XCTAssertEqual(rekeys(srec).first?.count, 64)
+    }
+
+    /// After the swap the new secret works, the code still works until restart, and a wrong code fails.
+    func testNewSecretAndCodeAcceptedAfterRekey() async throws {
+        var lc = makeConfig("rk2"); lc.token = "ABCDE12345"; lc.rekeyOnPair = true
+        let (srv, _, port) = await startListener("rk2", config: lc)
+        defer { srv.stop() }
+        let c = RawClient(port: port)
+        let ok = try await c.hello(token: "ABCDE12345")
+        c.close()
+        let newTok = try XCTUnwrap(ok?.rekey)
+        XCTAssertEqual(newTok.count, 64)
+        let c2 = RawClient(port: port); defer { c2.close() }
+        let ok2 = try await c2.hello(token: newTok)
+        XCTAssertEqual(ok2?.type, "hello_ok"); XCTAssertNil(ok2?.rekey)   // only one rekey per pairing
+        let c3 = RawClient(port: port); defer { c3.close() }
+        let ok3 = try await c3.hello(token: "ABCDE12345")
+        XCTAssertEqual(ok3?.type, "hello_ok")
+        let c4 = RawClient(port: port); defer { c4.close() }
+        let bad = try? await c4.hello(token: "ZZZZZ99999")
+        XCTAssertNotEqual((bad ?? nil)?.type, "hello_ok")
+    }
+}

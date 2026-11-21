@@ -97,8 +97,9 @@ struct MessageField: NSViewRepresentable {
             resize(tv)
         }
         tv.onFiles = { model.sendFiles($0) }
+        tv.onDroppedFiles = { model.sendFiles($0, fromDrop: true) }
         tv.onImage = { model.sendImage($0) }
-        tv.isOwn = { model.isOwn($0) }
+        tv.isOwn = { model.isChipDraggedBack($0) }
         handle.textView = tv
         let scroll = NSScrollView()
         scroll.documentView = tv
@@ -117,6 +118,7 @@ final class InputTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onChange: (() -> Void)?
     var onFiles: (([URL]) -> Void)?
+    var onDroppedFiles: (([URL]) -> Void)?
     var onImage: ((Data) -> Void)?
     var isOwn: ((URL) -> Bool)?
 
@@ -146,8 +148,7 @@ final class InputTextView: NSTextView {
 
     override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
         if let urls = Pasteboards.fileURLs(info.draggingPasteboard), !urls.isEmpty {
-            let fresh = urls.filter { !(isOwn?($0) ?? false) }
-            if !fresh.isEmpty { onFiles?(fresh) }
+            onDroppedFiles?(urls)
             return true
         }
         return super.performDragOperation(info)

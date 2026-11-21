@@ -63,6 +63,7 @@ final class AppModel {
         case .outgoing(let item): upsert(item)
         case .receiveFailed(let name, let reason): note("Couldn't receive \(name): \(reason)"); onPopUp()
         case .error(let msg): if !pairing { note(msg) }
+        case .rekeyed: break   // the controller saves the new secret
         }
     }
 
@@ -78,7 +79,18 @@ final class AppModel {
         if rows.count > maxRows { rows.removeFirst(rows.count - maxRows) }
     }
 
-    /// True when the URL is one of our own feed items (a chip dragged back onto the window).
+    /// When a file chip was last dragged out of this window. A drop of that same file soon after is the chip
+    /// coming back (ignore it); the same file dropped or pasted from Finder is a real resend (send it).
+    @ObservationIgnored var chipDragAt: Date?
+
+    /// True only for a chip dragged out of this window and dropped back on it.
+    func isChipDraggedBack(_ url: URL) -> Bool {
+        guard let t = chipDragAt, Date().timeIntervalSince(t) < 60, isOwn(url) else { return false }
+        chipDragAt = nil
+        return true
+    }
+
+    /// True when the URL is one of our own feed items.
     func isOwn(_ url: URL) -> Bool {
         rows.contains { if case .file(_, _, let u)? = $0.item?.kind { return u.standardizedFileURL == url.standardizedFileURL }; return false }
     }
@@ -92,12 +104,24 @@ final class AppModel {
         return true
     }
 
-    func sendFiles(_ urls: [URL]) {
-        guard let s = session, !pairing else { return }
-        for u in urls where !isOwn(u) {
+    func sendFiles(_ urls: [URL], fromDrop: Bool = false) {
+        guard let s = session else { note("Not connected yet: nothing was sent"); return }
+        guard !pairing else { return }
+        for raw in urls {
+            let u = (raw as NSURL).isFileReferenceURL() ? ((raw as NSURL).filePathURL ?? raw) : raw
+            if fromDrop && isChipDraggedBack(u) { continue }
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir) else { continue }
+            guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir) else {
+                // Never skip silently: say why (a missing file, or macOS privacy settings blocking the folder).
+                let why: String
+                do { _ = try FileManager.default.attributesOfItem(atPath: u.path); why = "unknown reason" }
+                catch { why = (error as NSError).localizedDescription }
+                DebugLog.write("can't send \(u.path): \(why)")
+                note("Couldn't read \(u.lastPathComponent): \(why)")
+                continue
+            }
             if isDir.boolValue { note("Folders can't be sent yet: \(u.lastPathComponent)"); continue }
+            DebugLog.write("sending \(u.path)")
             upsert(s.send(file: u))
         }
     }
@@ -120,4 +144,15 @@ struct PairActions {
     var search: () -> Void = {}
     var connect: () -> Void = {}
     var cancel: () -> Void = {}
+}
+
+/// `--debug-log PATH`: append diagnostic lines to a file (support and tests; off by default).
+enum DebugLog {
+    nonisolated(unsafe) static var path: String?
+    static func write(_ line: String) {
+        guard let path else { return }
+        let l = "\(Date()) \(line)\n"
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(l.utf8)); try? h.close() }
+        else { try? l.write(toFile: path, atomically: true, encoding: .utf8) }
+    }
 }

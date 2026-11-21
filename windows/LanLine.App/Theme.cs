@@ -76,6 +76,9 @@ static class Theme
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
     [StructLayout(LayoutKind.Sequential)] struct Margins { public int L, R, T, B; }
     [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins m);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     /// <summary>
     /// Smoked glass: Windows 11 22H2+ draws an Acrylic backdrop behind the (partly transparent) window.
@@ -100,6 +103,17 @@ static class Theme
             DwmExtendFrameIntoClientArea(hwnd, ref m);
             var acrylic = 3;
             DwmSetWindowAttribute(hwnd, 38, ref acrylic, sizeof(int)); // DWMWA_SYSTEMBACKDROP_TYPE = transient (Acrylic)
+            // With the frame extended over the whole window, DWM also paints the native minimize/maximize/close
+            // buttons behind ours (a second, unsynced set). Without WS_SYSMENU it doesn't; our buttons do the work.
+            const int GWL_STYLE = -16;
+            const long WS_SYSMENU = 0x00080000;
+            var style = (long)GetWindowLongPtr(hwnd, GWL_STYLE);
+            if ((style & WS_SYSMENU) != 0)
+            {
+                SetWindowLongPtr(hwnd, GWL_STYLE, (IntPtr)(style & ~WS_SYSMENU));
+                const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20;
+                SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            }
         }
     }
 

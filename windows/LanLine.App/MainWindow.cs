@@ -282,6 +282,7 @@ sealed partial class MainWindow : Window
         switch (e)
         {
             case SessionEvent.Listening: _statusText = $"Waiting for {Away}…"; break;
+            case SessionEvent.Rekeyed rk: Rekeyed(rk.Token); break;
             case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
             case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
             case SessionEvent.Status s: if (!_connected) _statusText = s.Text.StartsWith("dialing") ? $"Connecting to {Away}…" : $"Can't reach {Away}"; break;
@@ -296,10 +297,21 @@ sealed partial class MainWindow : Window
     /// <summary>Something arrived: bring the window back even if it was minimized or behind others.</summary>
     void PopUp()
     {
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Show();
+        // WindowState = Normal restores with SW_RESTORE, which also activates the window and takes the
+        // keyboard from whatever the user is typing in. SW_SHOWNOACTIVATE restores it without activating;
+        // WPF picks the new state up from WM_SIZE. (Windows session fix, test 14.)
+        if (WindowState == WindowState.Minimized)
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero) ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            else WindowState = WindowState.Normal;
+        }
+        if (!IsVisible) { ShowActivated = false; Show(); }
         if (!Topmost) { Topmost = true; Topmost = false; }   // raise without stealing the keyboard
     }
+
+    const int SW_SHOWNOACTIVATE = 4;
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
 
     // ---------- feed
 

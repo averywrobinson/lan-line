@@ -56,6 +56,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? config?.port ?? LanLineConfig.defaultPort }
 
     private func boot() {
+        DebugLog.path = options.value("--debug-log")
         model.myName = options.name
         model.pairActions = PairActions(
             switchMode: { [weak self] m in self?.beginPairing(m) },
@@ -85,9 +86,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func startSession(_ cfg: LanLineConfig) {
-        let sc = SessionConfig(token: cfg.token, name: options.name,
+    private func startSession(_ cfg: LanLineConfig, pairing: Bool = false) {
+        var sc = SessionConfig(token: cfg.token, name: options.name,
                                downloadDir: options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir)
+        sc.rekeyOnPair = pairing && !cfg.connects
         // The one main-thread hop: the Session calls this on its own queue.
         let s = Session(role: options.role(cfg), config: sc) { [weak self] event in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(event) } }
@@ -96,8 +98,30 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         s.start()
     }
 
+    private var debugPasteDone = false
+
     private func event(_ e: SessionEvent) {
+        if case .rekeyed(let t) = e {   // the pairing code was swapped for a long-term secret
+            if var p = pending { p.token = t; pending = p }
+            else if var c = config { c.token = t; save(c); config = c }
+        }
         model.handle(e)
+        // --debug-paste PATH: once connected, put PATH on the clipboard the way Finder's Copy does and run Paste.
+        if case .connected = e, !debugPasteDone, let path = options.value("--debug-paste") {
+            debugPasteDone = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                MainActor.assumeIsolated {
+                    let pb = NSPasteboard.general
+                    if path != "-" {   // "-" = paste whatever is on the clipboard now
+                        pb.clearContents()
+                        pb.writeObjects([URL(fileURLWithPath: path) as NSURL])
+                    }
+                    let tv = self?.panel.contentView.flatMap { Self.findInput(in: $0) }
+                    DebugLog.write("debug paste: types=\(pb.types?.map(\.rawValue).joined(separator: ",") ?? "-") input=\(tv == nil ? "missing" : "found")")
+                    tv?.paste(nil)
+                }
+            }
+        }
         guard case .connected(let name) = e else { return }
         if var p = pending {          // a pairing just worked: keep it
             pending = nil
@@ -107,7 +131,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             config = p
             model.pairing = false
             model.pairBusy = false
-            if !p.connects, responder == nil {
+            if !p.connects {   // advertise the pair id of the new long-term secret
+                responder?.close()
                 responder = try? DiscoveryResponder(port: p.port, name: options.name, pairID: PairCode.pairID(token: p.token), queue: .main)
             }
         } else if var c = config, c.peer != name {
@@ -148,7 +173,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.myAddresses = Discovery.localAddresses()
             let cfg = LanLineConfig(port: port, token: code, role: "listen")
             pending = cfg
-            startSession(cfg)
+            startSession(cfg, pairing: true)
             do { responder = try DiscoveryResponder(port: port, name: options.name, pairID: PairCode.pairID(token: code), queue: .main) }
             catch { model.pairError = "Other computers can't find this one automatically; type its address there." }
         case .enter:
@@ -205,6 +230,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.run(n)
             }
         }
+    }
+
+    static func findInput(in v: NSView) -> InputTextView? {
+        if let t = v as? InputTextView { return t }
+        for sub in v.subviews { if let t = findInput(in: sub) { return t } }
+        return nil
     }
 
     @objc private func pairFromMenu() { showPanel(activate: true); beginPairing(.show) }

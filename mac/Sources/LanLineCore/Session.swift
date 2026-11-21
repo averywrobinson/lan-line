@@ -26,6 +26,9 @@ public struct SessionConfig: Sendable {
     public var freeSpaceOverride: Int64?
     /// Seconds between liveness ticks. 0 = no timer (tests call `tick()` themselves).
     public var tickInterval: TimeInterval = 1
+    /// Listener, while pairing: answer the first good hello with a fresh 32-byte secret (`rekey`) and switch to
+    /// it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.
+    public var rekeyOnPair = false
 
     public init(token: String, name: String, downloadDir: URL) {
         self.token = token; self.name = name; self.downloadDir = downloadDir
@@ -70,6 +73,8 @@ public enum SessionEvent: Sendable, Equatable {
     case error(String)
     /// Diagnostics while not connected (which host is being dialed, why a dial failed).
     case status(String)
+    /// The pairing code was swapped for this long-term secret (both sides); save it in the config.
+    case rekeyed(token: String)
 }
 
 /// The one Lan-Line session object. The window, the headless mode and the tests all drive this.
@@ -77,6 +82,9 @@ public enum SessionEvent: Sendable, Equatable {
 public final class Session: @unchecked Sendable {
     public let role: Role
     public let config: SessionConfig
+    private var token: String          // current secret (starts as config.token)
+    private var oldToken: String?      // the pairing code, still accepted after a rekey until restart
+    private var rekeyOnPair: Bool
     public let queue: DispatchQueue
     private let handler: @Sendable (SessionEvent) -> Void
     private let now: @Sendable () -> Date
@@ -131,6 +139,9 @@ public final class Session: @unchecked Sendable {
                 clock: @escaping @Sendable () -> Date = { Date() },
                 handler: @escaping @Sendable (SessionEvent) -> Void) {
         self.role = role; self.config = config; self.handler = handler; self.now = clock
+        self.token = config.token
+        // A short token is a pairing code from 0.9.0-beta.1: upgrade it on the next connection too.
+        self.rekeyOnPair = config.rekeyOnPair || (config.token.count < 32 && { if case .listener = role { return true }; return false }())
         self.queue = DispatchQueue(label: "lan-line.session")
     }
 
@@ -262,7 +273,7 @@ public final class Session: @unchecked Sendable {
         let isActive = (l === link)
         switch ev {
         case .ready:
-            if l === dialing { l.send(text: Frame.hello(token: config.token, name: config.name).json) }
+            if l === dialing { l.send(text: Frame.hello(token: token, name: config.name).json) }
         case .closed(let reason):
             pending[ObjectIdentifier(l)] = nil
             if l === dialing {
@@ -284,7 +295,7 @@ public final class Session: @unchecked Sendable {
     private func handleHello(_ s: String, on l: Link) {
         pending[ObjectIdentifier(l)] = nil
         guard let f = Frame.decode(s), f.type == "hello", f.v == Frame.protocolVersion,
-              let tok = f.token, Secrets.equal(tok, config.token) else {
+              let tok = f.token, Secrets.equal(tok, token) || (oldToken.map { Secrets.equal(tok, $0) } ?? false) else {
             l.close("bad hello")
             return
         }
@@ -293,7 +304,15 @@ public final class Session: @unchecked Sendable {
             linkDown("replaced by a new connection")
             old.close("replaced")
         }
-        l.send(text: Frame.helloOK(name: config.name).json)
+        var rekey: String?
+        if rekeyOnPair && f.rekey == "?" {   // only peers that can save a new secret
+            rekeyOnPair = false
+            rekey = Secrets.newToken()
+            oldToken = token
+            token = rekey!
+        }
+        l.send(text: Frame.helloOK(name: config.name, rekey: rekey).json)
+        if let rekey { emit(.rekeyed(token: rekey)) }
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
 
@@ -301,6 +320,10 @@ public final class Session: @unchecked Sendable {
         guard let f = Frame.decode(s), f.type == "hello_ok" else { l.close("expected hello_ok"); return }
         dialing = nil
         attempt = 0
+        if let r = f.rekey, r.count == 64, r.allSatisfy(\.isHexDigit) {
+            token = r
+            emit(.rekeyed(token: r))
+        }
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
 

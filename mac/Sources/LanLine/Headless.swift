@@ -9,6 +9,7 @@ enum Headless {
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("lan-line-headless-\(getpid())")
         var sc = SessionConfig(token: cfg.token, name: o.name, downloadDir: downloads)
         sc.chunkSize = (o.value("--chunk").flatMap(Int.init) ?? 256) * 1024   // KiB per binary frame
+        sc.rekeyOnPair = o.flag("--rekey-on-pair")   // tests: act as the code-showing side of a pairing
         let state = HeadlessState(selftest: o.flag("--selftest"), echo: o.flag("--echo"),
                                   sizeMB: o.value("--size").flatMap(Int.init) ?? 50)
         let session = Session(role: o.role(cfg), config: sc) { state.handle($0) }
@@ -114,6 +115,7 @@ final class HeadlessState: @unchecked Sendable {
         case .receiveFailed(let name, let r): log("receive_failed", ["name": name, "reason": r]); if selftest { finish(false, r) }
         case .error(let s): log("error", ["message": s])
         case .status(let s): log("status", ["text": s])
+        case .rekeyed: log("rekeyed", [:])
         }
     }
 

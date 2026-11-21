@@ -28,6 +28,9 @@ public sealed class SessionConfig
     public long DiskReserve { get; init; } = 64L << 20;
     /// <summary>Tests: pretend the download disk has this many bytes free.</summary>
     public long? FreeSpaceOverride { get; init; }
+    /// <summary>Listener, while pairing: answer the first good hello with a fresh 32-byte secret (rekey) and switch
+    /// to it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.</summary>
+    public bool RekeyOnPair { get; init; }
     /// <summary>Liveness tick period; zero = no timer (tests call Tick themselves).</summary>
     public TimeSpan TickInterval { get; init; } = TimeSpan.FromSeconds(1);
 }
@@ -52,6 +55,8 @@ public abstract record SessionEvent
 {
     public sealed record Listening(int Port) : SessionEvent;
     public sealed record Connected(string Peer) : SessionEvent;
+    /// <summary>The pairing code was swapped for this long-term secret (both sides); save it in the config.</summary>
+    public sealed record Rekeyed(string Token) : SessionEvent;
     public sealed record Disconnected(string Reason) : SessionEvent;
     public sealed record Received(Item Item) : SessionEvent;
     public sealed record Outgoing(Item Item) : SessionEvent;
@@ -82,6 +87,9 @@ public sealed class Session : IDisposable
         public long Received; public string? Reject;
     }
 
+    string _token;            // current secret (starts as Config.Token)
+    string? _oldToken;        // the pairing code, still accepted after a rekey until restart
+    bool _rekeyOnPair;
     Listener? _listener;
     readonly Dictionary<Link, bool> _pending = [];
     Link? _link;
@@ -108,6 +116,9 @@ public sealed class Session : IDisposable
     public Session(Role role, SessionConfig config, Action<SessionEvent> handler, Func<DateTime>? clock = null)
     {
         Role = role; Config = config; _handler = handler; _now = clock ?? (() => DateTime.UtcNow);
+        _token = config.Token;
+        // A short token is a pairing code from 0.9.0-beta.1: upgrade it on the next connection too.
+        _rekeyOnPair = config.RekeyOnPair || (config.Token.Length < 32 && role is Role.Listen);
     }
 
     // ---------- public API (any thread) ----------
@@ -227,7 +238,7 @@ public sealed class Session : IDisposable
         switch (ev.Kind)
         {
             case LinkEventKind.Ready:
-                if (ReferenceEquals(l, _dialing)) l.SendText(Frame.Hello(Config.Token, Config.Name).Json);
+                if (ReferenceEquals(l, _dialing)) l.SendText(Frame.Hello(_token, Config.Name).Json);
                 break;
             case LinkEventKind.Closed:
                 _pending.Remove(l);
@@ -250,7 +261,7 @@ public sealed class Session : IDisposable
     {
         _pending.Remove(l);
         var f = Frame.Decode(s);
-        if (f is not { Type: "hello" } || f.V != Frame.ProtocolVersion || f.Token is null || !Secrets.Equal(f.Token, Config.Token))
+        if (f is not { Type: "hello" } || f.V != Frame.ProtocolVersion || f.Token is null || !(Secrets.Equal(f.Token, _token) || (_oldToken != null && Secrets.Equal(f.Token, _oldToken))))
         {
             l.Close("bad hello");
             return;
@@ -260,7 +271,16 @@ public sealed class Session : IDisposable
             LinkDown("replaced by a new connection");
             old.Close("replaced");
         }
-        l.SendText(Frame.HelloOk(Config.Name).Json);
+        string? rekey = null;
+        if (_rekeyOnPair && f.Rekey == "?")   // only peers that can save a new secret
+        {
+            _rekeyOnPair = false;
+            rekey = Secrets.NewToken();
+            _oldToken = _token;
+            _token = rekey;
+        }
+        l.SendText(Frame.HelloOk(Config.Name, rekey).Json);
+        if (rekey != null) Emit(new SessionEvent.Rekeyed(rekey));
         BecomeUp(l, f.Name ?? l.Peer);
     }
 
@@ -270,6 +290,11 @@ public sealed class Session : IDisposable
         if (f is not { Type: "hello_ok" }) { l.Close("expected hello_ok"); return; }
         _dialing = null;
         _attempt = 0;
+        if (f.Rekey is { Length: 64 } r && r.All(Uri.IsHexDigit))
+        {
+            _token = r;
+            Emit(new SessionEvent.Rekeyed(r));
+        }
         BecomeUp(l, f.Name ?? l.Peer);
     }
 

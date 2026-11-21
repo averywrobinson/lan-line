@@ -33,7 +33,7 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("queue drained after reconnect", T.QueueAfterReconnect), ("drop mid-file resends", T.DropMidFile),
     ("new peer replaces old", T.NewPeerReplaces), ("pair codes", T.PairCodes),
     ("discovery reply round trip", T.DiscoveryReply), ("discovery over loopback", T.DiscoveryLoopback),
-    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace),
+    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -415,6 +415,30 @@ static class T
         var ack = await c.NextNonBeat();
         H.True(ack is { Ok: false } && ack.Err!.StartsWith("not enough disk space"), $"refused for space, got {ack}");
         H.Eq(0, Directory.GetFileSystemEntries(s.Config.DownloadDir).Length, "folder empty");
+    }
+
+    public static async Task Rekey()
+    {
+        var lc = new SessionConfig { Token = "ABCDE12345", Name = "rk-l", DownloadDir = H.TempDir("rk-l"), RekeyOnPair = true };
+        var (s, lrec, port) = await H.Listener("rk-l", lc);
+        using var __ = s;
+        // a real dialer presenting the code: both sides get the same 64-hex secret
+        var drec = new Recorder();
+        using (var d = new Session(new Role.Dial(["127.0.0.1"], port), new SessionConfig { Token = "ABCDE12345", Name = "rk-d", DownloadDir = H.TempDir("rk-d") }, drec.Add))
+        {
+            d.Start();
+            await H.Until(() => drec.All.OfType<SessionEvent.Connected>().Any(), "dialer connected", 5);
+            var lt = lrec.All.OfType<SessionEvent.Rekeyed>().Select(r => r.Token).ToList();
+            var dt = drec.All.OfType<SessionEvent.Rekeyed>().Select(r => r.Token).ToList();
+            H.Eq(1, lt.Count, "listener rekeyed once");
+            H.True(lt.SequenceEqual(dt), "same secret on both sides");
+            H.Eq(64, lt[0].Length, "64-hex secret");
+        }
+        var newTok = lrec.All.OfType<SessionEvent.Rekeyed>().First().Token;
+        // afterwards: the new secret works (no second rekey), the code still works, a wrong code fails
+        using (var c = await RawClient.Connect(port)) { var ok = await c.Hello(newTok); H.True(ok is { Type: "hello_ok", Rekey: null }, $"new secret accepted, got {ok}"); }
+        using (var c = await RawClient.Connect(port)) { var ok = await c.Hello("ABCDE12345"); H.True(ok is { Type: "hello_ok" }, $"code still accepted, got {ok}"); }
+        using (var c = await RawClient.Connect(port)) { var bad = await c.Hello("ZZZZZ99999"); H.True(bad is not { Type: "hello_ok" }, $"wrong code refused, got {bad}"); }
     }
 
     public static async Task DeadLink()

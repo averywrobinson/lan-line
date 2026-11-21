@@ -7,7 +7,7 @@ Control messages are UTF-8 JSON **text frames** with a `type` field. File bytes 
 | type | Fields | Direction | Meaning |
 |---|---|---|---|
 | `hello` | `v` (1), `token` (the pairing code, 10 characters; older configs: 64 hex chars), `name` | dialer → listener, first frame | Authenticate. The listener compares the token in constant time; on a mismatch, a wrong `v`, or no hello within 10 s it closes the socket. |
-| `hello_ok` | `name` | listener → dialer | Accepted; both sides are now connected. |
+| `hello_ok` | `name`, `rekey` (optional) | listener → dialer | Accepted; both sides are now connected. Right after pairing, `rekey` carries a fresh 64-hex secret that replaces the pairing code on both sides. |
 | `text` | `id`, `text` | either | A text item. |
 | `file_begin` | `id`, `name`, `size`, `sha256` (hex) | either | A file follows. `size` ≤ 1 TiB (a sanity bound); the receiver refuses a file that would leave under 64 MiB free. |
 | (binary) | raw bytes | either | The next chunk of the current file. |
@@ -25,5 +25,6 @@ Control messages are UTF-8 JSON **text frames** with a `type` field. File bytes 
 
 ## Pairing and discovery
 
+- **Rekey:** a dialer that can store a new secret sends `"rekey":"?"` in its `hello`. When the listener is pairing (or still holds a 10-character code from 0.9.0-beta.1), it answers that hello's `hello_ok` with `rekey`: a new random 32-byte secret, hex. Both sides save it and use it from then on, so the short on-screen code is never the long-term secret. The listener keeps accepting the code until it restarts, in case the `hello_ok` was lost.
 - **Pairing code:** 10 characters of Crockford base32 (`0-9 A-Z` without `I L O U`), shown as `XXXXX-XXXXX`. When typed, case and dashes are ignored and `O`→`0`, `I`/`L`→`1`. The code is the shared token: the dialer sends it in `hello`. Nothing is saved until the first connection succeeds; then both sides keep `{port, token, role, hosts, peer}` in their config.
 - **Discovery (UDP, same port 47830):** the dialer broadcasts the ASCII datagram `LANLINE?1` (to 255.255.255.255 and each interface's broadcast address). A listening computer answers with JSON `{"lanline":1,"name":…,"port":…,"pair":…}`, where `pair` is the first 8 hex characters of SHA-256 of `"lan-line-pair:" + token`. The pair id reveals nothing about the code; a paired dialer that can't reach its partner searches again every 20 s and follows a matching `pair` to a new address.

@@ -43,8 +43,8 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.1-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
-| **Windows** | `Lan-Line-0.9.0-beta.1-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.2-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
+| **Windows** | `Lan-Line-0.9.0-beta.2-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew:
 
