@@ -34,6 +34,7 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 - **Copy and delivery checks.** Every message and file has a copy button and a ✓ once the other computer has it.
 - **Wakes on receive.** Minimize it; it pops back up when something arrives.
 - **Direct and local.** Machine to machine over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
+- **Encrypted end to end.** Everything between the two computers is encrypted (AES-256-GCM), with fresh keys for every connection. The pairing code and the long-term secret are never sent in the clear.
 - **Live status.** Emerald means connected; slate means waiting for the other computer.
 - **Storage you control.** Keep received files forever or for 1–90 days (or custom), set a storage limit with gentle warnings, and optionally move the oldest files to the Trash / Recycle Bin. Nothing is deleted unless you turn it on.
 - **Follows your theme.** Smoked glass in dark mode, a matching light look, on both systems.
@@ -54,8 +55,8 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.4-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
-| **Windows** | `Lan-Line-0.9.0-beta.4-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.5-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 14+, Apple Silicon |
+| **Windows** | `Lan-Line-0.9.0-beta.5-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew:
 
@@ -88,11 +89,17 @@ Pairing again later: *Lan-Line → Pair with Another Computer…* on the Mac, or
 
 ## Privacy
 
-Everything stays on your network: no servers, no accounts, no analytics or telemetry. Received files land in `Downloads/Lan-Line`. The pairing code is the shared secret; it's stored only in your user's app-data folder. Traffic on the LAN is not encrypted in this beta, so use Lan-Line on networks you trust.
+Everything stays on your network: no servers, no accounts, no analytics or telemetry. Received files land in `Downloads/Lan-Line`.
+
+Since 0.9.0-beta.5, all traffic between the two computers is encrypted. The pairing code only proves that the two computers belong together and is never sent; right after pairing they switch to a random 32-byte secret, which travels encrypted. Every connection derives its own AES-256-GCM keys from a fresh P-256 key exchange, so someone on your network can neither read nor change what you send, and a secret stolen later can't decrypt old traffic. The secret is stored only in your user's app-data folder.
+
+Limits: someone on your network can still see how much is sent and when, and encryption can't protect a computer that is already compromised. Full design and threat model: [ENCRYPTION.md](ENCRYPTION.md).
+
+**Updating from beta.4:** update both computers. beta.5 can't talk to beta.4 (there is no unencrypted fallback); until both are updated, the window says "Update Lan-Line on …". Your pairing carries over.
 
 ## How it works
 
-Each pair of computers keeps one WebSocket connection. Text and file metadata are small JSON messages; files stream in 256 KiB chunks and are verified with SHA-256 before they appear. Computers find each other with a UDP broadcast on port 47830. Details: [PROTOCOL.md](PROTOCOL.md).
+Each pair of computers keeps one WebSocket connection, encrypted after a short handshake. Text and file metadata are small JSON messages; files stream in 256 KiB chunks and are verified with SHA-256 before they appear. Computers find each other with a UDP broadcast on port 47830. Details: [PROTOCOL.md](PROTOCOL.md).
 
 ```
 mac/       Swift 6 (SwiftPM): LanLineCore library, LanLine app (AppKit + SwiftUI), XCTest

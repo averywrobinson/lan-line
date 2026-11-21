@@ -29,6 +29,8 @@ sealed class Link
     public DateTime OpenedAt { get; }
     public string Peer { get; }
     public bool IsClosed { get; private set; }
+    /// <summary>Set once the v2 handshake is done: from then on every message is sealed and plaintext is refused.</summary>
+    public SecureChannel? Secure { get; set; }
 
     Link(SerialQueue q, Action<Link, LinkEvent> onEvent, DateTime openedAt, string peer)
     {
@@ -100,7 +102,7 @@ sealed class Link
                 var ev = r.MessageType == WebSocketMessageType.Text
                     ? new LinkEvent(LinkEventKind.Text, Text: Encoding.UTF8.GetString(data))
                     : new LinkEvent(LinkEventKind.Data, Data: data);
-                _q.Post(() => { if (!IsClosed) _onEvent(this, ev); });
+                _q.Post(() => { if (!IsClosed) Deliver(ev); });
             }
         }
         catch (Exception e)
@@ -125,8 +127,44 @@ sealed class Link
         catch (OperationCanceledException) { }
     }
 
-    public void SendText(string s, Action<bool>? done = null) => Enqueue(Encoding.UTF8.GetBytes(s), WebSocketMessageType.Text, done);
-    public void SendData(byte[] d, Action<bool>? done = null) => Enqueue(d, WebSocketMessageType.Binary, done);
+    /// <summary>On the queue, in arrival order, so the receive counter matches the sender's.</summary>
+    void Deliver(LinkEvent ev)
+    {
+        if (Secure is { } ch)
+        {
+            if (ev.Kind == LinkEventKind.Text) { Finish("plaintext after the handshake"); return; }
+            if (ch.Open(ev.Data!) is not { } m) { Finish("decrypt failed"); return; }
+            ev = m.Kind == ChannelKind.Chunk
+                ? new LinkEvent(LinkEventKind.Data, Data: m.Payload)
+                : new LinkEvent(LinkEventKind.Text, Text: Encoding.UTF8.GetString(m.Payload));
+        }
+        _onEvent(this, ev);
+    }
+
+    public void SendText(string s, Action<bool>? done = null)
+    {
+        if (Secure != null) SendSealed(ChannelKind.Control, Encoding.UTF8.GetBytes(s), done);
+        else Enqueue(Encoding.UTF8.GetBytes(s), WebSocketMessageType.Text, done);
+    }
+
+    public void SendData(byte[] d, Action<bool>? done = null)
+    {
+        if (Secure != null) SendSealed(ChannelKind.Chunk, d, done);
+        else Enqueue(d, WebSocketMessageType.Binary, done);
+    }
+
+    /// <summary>Seal at enqueue time (on the queue): the send channel is FIFO, so counters reach the wire in order.</summary>
+    void SendSealed(ChannelKind kind, byte[] payload, Action<bool>? done)
+    {
+        if (IsClosed || Secure is not { } ch) { if (done != null) _q.Post(() => done(false)); return; }
+        if (ch.Seal(kind, payload) is not { } sealedMsg)
+        {
+            if (done != null) _q.Post(() => done(false));
+            Finish("message limit reached; reconnecting for fresh keys");
+            return;
+        }
+        Enqueue(sealedMsg, WebSocketMessageType.Binary, done);
+    }
 
     void Enqueue(byte[] d, WebSocketMessageType t, Action<bool>? done)
     {
@@ -144,6 +182,7 @@ sealed class Link
         _cts.Cancel();
         _sendQ.Writer.TryComplete();
         try { _ws?.Abort(); _ws?.Dispose(); } catch (Exception) { }
+        Secure?.Dispose();
         _onEvent(this, new LinkEvent(LinkEventKind.Closed, Reason: reason));
     }
 

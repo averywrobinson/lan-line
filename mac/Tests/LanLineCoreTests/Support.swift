@@ -79,23 +79,39 @@ func startDialer(_ tag: String, port: UInt16, config: SessionConfig? = nil) -> (
     return (s, rec)
 }
 
-/// A raw protocol client on URLSessionWebSocketTask, independent of Network.framework.
+/// A raw protocol client on URLSessionWebSocketTask, independent of the app's own socket code.
+/// It speaks protocol v2: `hello` runs the handshake, then `send`/`next` go through the encrypted channel.
 final class RawClient: @unchecked Sendable {
     let task: URLSessionWebSocketTask
+    var channel: Channel?
     init(port: UInt16) {
         task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/lan-line")!)
         task.maximumMessageSize = 4 << 20
         task.resume()
     }
-    func send(_ f: Frame) async throws { try await task.send(.string(f.json)) }
-    func send(_ d: Data) async throws { try await task.send(.data(d)) }
-    /// Next control frame, or nil if the socket closed.
+    /// A text frame in the clear, whatever the state (tests of what the listener refuses).
+    func sendPlain(_ f: Frame) async throws { try await task.send(.string(f.json)) }
+    func sendPlainData(_ d: Data) async throws { try await task.send(.data(d)) }
+    func send(_ f: Frame) async throws {
+        if let ch = channel { try await task.send(.data(ch.seal(.control, Data(f.json.utf8))!)) } else { try await sendPlain(f) }
+    }
+    func send(_ d: Data) async throws {
+        if let ch = channel { try await task.send(.data(ch.seal(.chunk, d)!)) } else { try await sendPlainData(d) }
+    }
+    /// Next control frame, or nil if the socket closed. Binary chunks read as type "binary";
+    /// a message the channel can't open reads as "undecryptable".
     func next(timeout: TimeInterval = 5) async -> Frame? {
         await withTaskGroup(of: Frame?.self) { g in
             g.addTask {
                 guard let m = try? await self.task.receive() else { return nil }
-                if case .string(let s) = m { return Frame.decode(s) }
-                return Frame(type: "binary")
+                switch m {
+                case .string(let s): return Frame.decode(s) ?? Frame(type: "garbage")
+                case .data(let d):
+                    guard let ch = self.channel else { return Frame(type: "binary") }
+                    guard let (kind, body) = ch.open(d) else { return Frame(type: "undecryptable") }
+                    return kind == .chunk ? Frame(type: "binary") : (Frame.decode(String(decoding: body, as: UTF8.self)) ?? Frame(type: "garbage"))
+                @unknown default: return Frame(type: "garbage")
+                }
             }
             g.addTask { try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9)); return Frame(type: "timeout") }
             let first = await g.next() ?? nil
@@ -110,9 +126,17 @@ final class RawClient: @unchecked Sendable {
             if f?.type != "beat" { return f }
         }
     }
-    func hello(token: String = testToken) async throws -> Frame? {
-        try await send(.hello(token: token, name: "raw"))
-        return await nextNonBeat()
+    /// The v2 handshake. Returns the listener's reply; on a good hello_ok the channel is set.
+    /// A hello_ok whose MAC doesn't check out comes back as type "badmac".
+    func hello(token: String = testToken, name: String = "raw") async throws -> Frame? {
+        let hs = DialerHandshake(secret: token, name: name)
+        try await sendPlain(hs.hello)
+        let reply = await nextNonBeat()
+        if let r = reply, r.type == "hello_ok" {
+            guard let ch = hs.finish(r) else { return Frame(type: "badmac") }
+            channel = ch
+        }
+        return reply
     }
     func close() { task.cancel(with: .normalClosure, reason: nil) }
 }

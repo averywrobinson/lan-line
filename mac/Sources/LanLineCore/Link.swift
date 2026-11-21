@@ -41,6 +41,8 @@ final class Link: @unchecked Sendable {
     private var outQ: [(data: Data, offset: Int, done: (@Sendable (Bool) -> Void)?)] = []
     private var handler: (@Sendable (LinkEvent) -> Void)?
     private(set) var isClosed = false
+    /// Set once the v2 handshake is done: from then on every message is sealed and plaintext is refused.
+    var channel: Channel?
 
     static let maxMessage = 2 << 20   // well above the 256 KiB chunk size
     private static let readSize = 256 * 1024
@@ -183,8 +185,13 @@ final class Link: @unchecked Sendable {
         for ev in events {
             guard !isClosed else { return }
             switch ev {
-            case .text(let s): handler?(.text(s))
-            case .binary(let d): handler?(.data(d))
+            case .text(let s):
+                if channel != nil { close(code: 1008, reason: "plaintext after the handshake"); return }
+                handler?(.text(s))
+            case .binary(let d):
+                guard let ch = channel else { handler?(.data(d)); continue }
+                guard let (kind, body) = ch.open(d) else { close(code: 1008, reason: "decrypt failed"); return }
+                if kind == .chunk { handler?(.data(body)) } else { handler?(.text(String(decoding: body, as: UTF8.self))) }
             case .ping(let p): sendFrame(.pong, p, done: nil)
             case .pong: break
             case .close: close(code: 1000, reason: "closed by peer")
@@ -200,11 +207,24 @@ final class Link: @unchecked Sendable {
     }
 
     func send(text: String, completion: @escaping @Sendable (Bool) -> Void = { _ in }) {
-        sendFrame(.text, Data(text.utf8), done: completion)
+        if channel != nil { sendSealed(.control, Data(text.utf8), done: completion) }
+        else { sendFrame(.text, Data(text.utf8), done: completion) }
     }
 
     func send(data: Data, completion: @escaping @Sendable (Bool) -> Void = { _ in }) {
-        sendFrame(.binary, data, done: completion)
+        if channel != nil { sendSealed(.chunk, data, done: completion) }
+        else { sendFrame(.binary, data, done: completion) }
+    }
+
+    /// Seal at enqueue time: the write queue is FIFO, so counters reach the wire in order.
+    private func sendSealed(_ kind: Channel.Kind, _ payload: Data, done: @escaping @Sendable (Bool) -> Void) {
+        guard !isClosed, handshaken, let ch = channel else { queue.async { done(false) }; return }
+        guard let sealed = ch.seal(kind, payload) else {
+            queue.async { done(false) }
+            close("message limit reached; reconnecting for fresh keys")
+            return
+        }
+        sendFrame(.binary, sealed, done: done)
     }
 
     private func sendFrame(_ op: WSOpcode, _ payload: Data, done: (@Sendable (Bool) -> Void)?) {

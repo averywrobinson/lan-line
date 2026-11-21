@@ -34,6 +34,9 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("new peer replaces old", T.NewPeerReplaces), ("pair codes", T.PairCodes),
     ("discovery reply round trip", T.DiscoveryReply), ("discovery over loopback", T.DiscoveryLoopback),
     ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey), ("storage cleanup rules", T.StorageRules), ("listener addresses reach dialer", T.PeerAddrs),
+    ("v2 shared test vectors", T.CryptoVectors), ("v2 handshake refusals", T.HandshakeRefusals),
+    ("v2 channel tamper, replay, reorder", T.ChannelTamper), ("v2 nothing readable on the wire", T.WireCapture),
+    ("v2 live link closes on tamper or plaintext", T.LiveTamper), ("v2 dialer with wrong secret refused", T.WrongSecretDialer),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -82,18 +85,23 @@ sealed class FakeClock
     public void Advance(double s) => Interlocked.Add(ref _ticks, TimeSpan.FromSeconds(s).Ticks);
 }
 
+/// <summary>A raw protocol v2 client: Hello runs the handshake, then Send/Next go through the encrypted channel.</summary>
 sealed class RawClient : IDisposable
 {
     readonly ClientWebSocket _ws = new();
+    public SecureChannel? Channel;
     public static async Task<RawClient> Connect(int port)
     {
         var c = new RawClient();
         await c._ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/lan-line"), CancellationToken.None);
         return c;
     }
-    public Task Send(Frame f) => _ws.SendAsync(Encoding.UTF8.GetBytes(f.Json), WebSocketMessageType.Text, true, CancellationToken.None);
-    public Task Send(byte[] d) => _ws.SendAsync(d, WebSocketMessageType.Binary, true, CancellationToken.None);
-    /// <summary>Next control frame; null if the socket closed or nothing came within the timeout.</summary>
+    /// <summary>A text frame in the clear, whatever the state (tests of what the listener refuses).</summary>
+    public Task SendPlain(Frame f) => _ws.SendAsync(Encoding.UTF8.GetBytes(f.Json), WebSocketMessageType.Text, true, CancellationToken.None);
+    public Task SendPlain(byte[] d) => _ws.SendAsync(d, WebSocketMessageType.Binary, true, CancellationToken.None);
+    public Task Send(Frame f) => Channel is { } ch ? SendPlain(ch.Seal(ChannelKind.Control, Encoding.UTF8.GetBytes(f.Json))!) : SendPlain(f);
+    public Task Send(byte[] d) => Channel is { } ch ? SendPlain(ch.Seal(ChannelKind.Chunk, d)!) : SendPlain(d);
+    /// <summary>Next control frame; null if the socket closed. Chunks read as "binary", unopenable messages as "undecryptable".</summary>
     public async Task<Frame?> Next(double timeout = 5)
     {
         try
@@ -107,7 +115,11 @@ sealed class RawClient : IDisposable
                 if (r.MessageType == WebSocketMessageType.Close) return null;
                 ms.Write(buf, 0, r.Count);
                 if (!r.EndOfMessage) continue;
-                return r.MessageType == WebSocketMessageType.Text ? Frame.Decode(Encoding.UTF8.GetString(ms.ToArray())) : new Frame { Type = "binary" };
+                var data = ms.ToArray();
+                if (r.MessageType == WebSocketMessageType.Text) return Frame.Decode(Encoding.UTF8.GetString(data)) ?? new Frame { Type = "garbage" };
+                if (Channel is not { } ch) return new Frame { Type = "binary" };
+                if (ch.Open(data) is not { } m) return new Frame { Type = "undecryptable" };
+                return m.Kind == ChannelKind.Chunk ? new Frame { Type = "binary" } : Frame.Decode(Encoding.UTF8.GetString(m.Payload)) ?? new Frame { Type = "garbage" };
             }
         }
         catch (OperationCanceledException) { return new Frame { Type = "timeout" }; }
@@ -117,12 +129,61 @@ sealed class RawClient : IDisposable
     {
         while (true) { var f = await Next(timeout); if (f?.Type != "beat") return f; }
     }
-    public async Task<Frame?> Hello(string? token = null)
+    /// <summary>The v2 handshake. A hello_ok whose MAC doesn't check out comes back as type "badmac".</summary>
+    public async Task<Frame?> Hello(string? token = null, string name = "raw")
     {
-        await Send(Frame.Hello(token ?? H.Token, "raw"));
-        return await NextNonBeat();
+        var hs = new DialerHandshake(token ?? H.Token, name);
+        await SendPlain(hs.Hello);
+        var reply = await NextNonBeat();
+        if (reply is { Type: "hello_ok" })
+        {
+            if (hs.Finish(reply) is not { } ch) return new Frame { Type = "badmac" };
+            Channel = ch;
+        }
+        return reply;
     }
     public void Dispose() { try { _ws.Abort(); } catch (Exception) { } _ws.Dispose(); }
+}
+
+/// <summary>A TCP relay that records every byte both ways: what someone on the network would see.</summary>
+sealed class TapProxy : IDisposable
+{
+    readonly System.Net.Sockets.TcpListener _l = new(System.Net.IPAddress.Loopback, 0);
+    readonly MemoryStream _bytes = new();
+    public int Port { get; }
+    public byte[] Captured { get { lock (_bytes) return _bytes.ToArray(); } }
+    public TapProxy(int target)
+    {
+        _l.Start();
+        Port = ((System.Net.IPEndPoint)_l.LocalEndpoint).Port;
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                System.Net.Sockets.TcpClient c;
+                try { c = await _l.AcceptTcpClientAsync(); } catch (Exception) { return; }
+                var u = new System.Net.Sockets.TcpClient();
+                await u.ConnectAsync(System.Net.IPAddress.Loopback, target);
+                _ = Pump(c.GetStream(), u.GetStream()); _ = Pump(u.GetStream(), c.GetStream());
+            }
+        });
+    }
+    async Task Pump(Stream from, Stream to)
+    {
+        var buf = new byte[65536];
+        try
+        {
+            int n;
+            while ((n = await from.ReadAsync(buf)) > 0)
+            {
+                lock (_bytes) _bytes.Write(buf, 0, n);
+                await to.WriteAsync(buf.AsMemory(0, n));
+            }
+        }
+        catch (Exception) { }
+        try { to.Close(); } catch (Exception) { }
+    }
+    public void Dispose() => _l.Stop();
 }
 
 static class H
@@ -262,12 +323,20 @@ static class T
         foreach (var bad in new[] { string.Concat(Enumerable.Repeat("cd", 32)), "short", "" })
         {
             using var c = await RawClient.Connect(port);
-            await c.Send(Frame.Hello(bad, "evil"));
+            var reply = await c.Hello(bad, "evil");
+            H.True(reply is { Type: "error", Err: "auth" } && c.Channel == null, $"refused for token '{bad}', got {reply}");
             H.True(await c.Next() == null, $"socket should close for token '{bad}'");
+        }
+        using (var c = await RawClient.Connect(port))   // a v1 hello, even with the right secret: "upgrade", then closed
+        {
+            await c.SendPlain(Frame.LegacyHello(H.Token, "beta4"));
+            var up = await c.Next();
+            H.True(up is { Type: "error", Err: "upgrade", V: 2 }, $"upgrade error, got {up}");
+            H.True(await c.Next() == null, "closed after upgrade");
         }
         using (var c = await RawClient.Connect(port))
         {
-            await c.Send(Frame.TextItem("x", "hi"));
+            await c.SendPlain(Frame.TextItem("x", "hi"));
             H.True(await c.Next() == null, "non-hello first frame closes");
         }
         H.Eq(0, r.Connects, "no connects");
@@ -436,8 +505,19 @@ static class T
         }
         var newTok = lrec.All.OfType<SessionEvent.Rekeyed>().First().Token;
         // afterwards: the new secret works (no second rekey), the code still works, a wrong code fails
-        using (var c = await RawClient.Connect(port)) { var ok = await c.Hello(newTok); H.True(ok is { Type: "hello_ok", Rekey: null }, $"new secret accepted, got {ok}"); }
-        using (var c = await RawClient.Connect(port)) { var ok = await c.Hello("ABCDE12345"); H.True(ok is { Type: "hello_ok" }, $"code still accepted, got {ok}"); }
+        using (var c = await RawClient.Connect(port))
+        {
+            var ok = await c.Hello(newTok);
+            H.True(ok is { Type: "hello_ok", Rekey: null }, $"new secret accepted, got {ok}");
+            H.Eq("timeout", (await c.NextNonBeat(1))?.Type, "only one rekey per pairing");
+        }
+        using (var c = await RawClient.Connect(port))
+        {
+            var ok = await c.Hello("ABCDE12345");
+            H.True(ok is { Type: "hello_ok", Rekey: null }, $"code still accepted, got {ok}");
+            var again = await c.NextNonBeat();   // still on the code: it missed the swap, so it gets the secret again (encrypted)
+            H.True(again is { Type: "rekey" } && again.Token == newTok, $"secret resent, got {again}");
+        }
         using (var c = await RawClient.Connect(port)) { var bad = await c.Hello("ZZZZZ99999"); H.True(bad is not { Type: "hello_ok" }, $"wrong code refused, got {bad}"); }
     }
 
@@ -633,5 +713,160 @@ static class T
         await H.Until(() => r.Connects == 2, "two connects");
         H.True(await c1.NextNonBeat() == null, "old peer closed");
         H.True(s.IsConnected, "still connected");
+    }
+
+    // ---------- protocol v2 encryption (ENCRYPTION.md) ----------
+
+    /// <summary>The same vectors as mac/Tests/LanLineCoreTests/EncryptionTests.swift (checked there against Python and OpenSSL).</summary>
+    static class V
+    {
+        public static readonly string Secret = string.Concat(Enumerable.Repeat("0123456789abcdef", 4));
+        public const string DPriv = "96d378741622987330bc9c86cf6320db2a8d8b03ca1b41952d2b4f88afec9d87";
+        public const string SPriv = "9766ee84697f1f685124f912fc0af0a138b71c7ba914c975f8e25cac1e15060d";
+        public static readonly byte[] NonceC = [.. Enumerable.Range(0, 32).Select(i => (byte)i)];
+        public static readonly byte[] NonceS = [.. Enumerable.Range(32, 32).Select(i => (byte)i)];
+        public const string EpkC = "043cdfbbfa399ce91b063c6c9a04886ac1c1052555919764e99558fc8d7acf6910a6e23a2bde6e33b5bbb83d3f0e126d66d1dec6c3c59795601fae93d55984a10d";
+        public const string EpkS = "0474f4d2ce524a51341efdbcb8967d7507a2a9ec51ddf2eb03ccee3da2a5b15843d7883ec3b1667e24ac2a4f1b72fde364c4171d203eef7b671d59dc25a23918e9";
+        public const string KMac = "56369e54a9d7137a62150b0f8f7c0d06371df6e4913e6595b0b15905abf5a341";
+        public const string Mac1 = "37379b5a9644fcdbb65e45a8e17b878f014b2a40d7d1671230e6b63f5d74cfd7";
+        public const string Mac2 = "7a561db236359efc855431b3b296a7ba6f95b78b95fac0064399a71f1058179b";
+        public const string Z = "6c976a76036dbc925297e872860722a812f6065d2ffcec403b86fcb95bb6e906";
+        public const string D2L = "103c2289e2ff41e4283a542ab18132c0d0fd5d0c595dd0adaf79652a4fd05056";
+        public const string L2D = "a875fa75ca95485fbc9bf0d903a7b7a63a6fe971bf5482b66cff7560f45346a8";
+        public const string Seal0 = "d63d5b918c65f89780b319df55d6430f8209dc095c73bc222e5fbccfb9e79b5a";
+        public const string Seal1 = "d83d3bcc0edbe97cc896b0cde40d93f1024f8dcf";
+    }
+    static byte[] Hex(string h) => Convert.FromHexString(h);
+    static string Hex(byte[] b) => Convert.ToHexStringLower(b);
+
+    public static Task CryptoVectors()
+    {
+        using var dc = LL2.KeyFrom(Hex(V.DPriv), Hex(V.EpkC));
+        using var ds = LL2.KeyFrom(Hex(V.SPriv), Hex(V.EpkS));
+        H.Eq(V.EpkC, Hex(LL2.Epk(dc)), "dialer epk");
+        H.Eq(V.KMac, Hex(LL2.MacKey(V.Secret)), "K_mac");
+        var hs = new DialerHandshake(V.Secret, "mac", dc, V.NonceC);
+        H.Eq(V.Mac1, Hex(Convert.FromBase64String(hs.Hello.Mac!)), "hello MAC");
+        var a = ListenerHandshake.Respond(hs.Hello, [V.Secret], "pc", ds, V.NonceS) ?? throw new Exception("listener refused the vector hello");
+        H.Eq(V.Mac2, Hex(Convert.FromBase64String(a.Ok.Mac!)), "hello_ok MAC");
+        H.Eq(V.Z, Hex(LL2.Z(dc, Hex(V.EpkS))!), "ECDH Z");
+        var t1 = LL2.T1("mac", V.NonceC, Hex(V.EpkC));
+        var (d2l, l2d) = LL2.SessionKeys(Hex(V.Z), V.Secret, LL2.T2(t1, "pc", V.NonceS, Hex(V.EpkS)));
+        H.Eq(V.D2L, Hex(d2l), "dialer→listener key"); H.Eq(V.L2D, Hex(l2d), "listener→dialer key");
+        var ch = hs.Finish(a.Ok) ?? throw new Exception("dialer refused the vector hello_ok");
+        H.Eq(V.Seal0, Hex(ch.Seal(ChannelKind.Control, "{\"type\":\"beat\"}"u8)!), "sealed message 0");
+        H.Eq(V.Seal1, Hex(ch.Seal(ChannelKind.Chunk, new byte[] { 1, 2, 3 })!), "sealed message 1");
+        H.Eq("{\"type\":\"beat\"}", Encoding.UTF8.GetString(a.Channel.Open(Hex(V.Seal0))!.Value.Payload), "listener opens 0");
+        var m1 = a.Channel.Open(Hex(V.Seal1))!.Value;
+        H.True(m1.Kind == ChannelKind.Chunk && m1.Payload.SequenceEqual(new byte[] { 1, 2, 3 }), "listener opens 1");
+        return Task.CompletedTask;
+    }
+
+    public static Task HandshakeRefusals()
+    {
+        var sec = V.Secret;
+        var hs = new DialerHandshake(sec, "mac");
+        string OtherEpk() { using var k = LL2.NewKey(); return Convert.ToBase64String(LL2.Epk(k)); }
+        H.True(ListenerHandshake.Respond(hs.Hello, [new string('f', 64)], "pc") == null, "wrong secret");
+        H.True(ListenerHandshake.Respond(hs.Hello, [], "pc") == null, "no secret");
+        H.True(ListenerHandshake.Respond(hs.Hello with { Epk = OtherEpk() }, [sec], "pc") == null, "swapped epk");
+        H.True(ListenerHandshake.Respond(hs.Hello with { Nonce = Convert.ToBase64String(new byte[32]) }, [sec], "pc") == null, "changed nonce");
+        H.True(ListenerHandshake.Respond(hs.Hello with { Name = "evil" }, [sec], "pc") == null, "changed name");
+        H.True(ListenerHandshake.Respond(hs.Hello with { V = 1 }, [sec], "pc") == null, "v1");
+        H.True(ListenerHandshake.Respond(hs.Hello with { Epk = Convert.ToBase64String(Enumerable.Repeat((byte)4, 65).ToArray()) }, [sec], "pc") == null, "not a curve point");
+        H.True(ListenerHandshake.Respond(hs.Hello with { Mac = "%%%" }, [sec], "pc") == null, "bad base64");
+        var hs2 = new DialerHandshake("ABCDE12345", "mac");
+        var a = ListenerHandshake.Respond(hs2.Hello, [sec, "ABCDE12345"], "pc") ?? throw new Exception("previous secret refused");
+        H.Eq(1, a.SecretIndex, "previous secret index");
+        H.True(hs2.Finish(a.Ok) != null, "dialer accepts");
+        var fake = ListenerHandshake.Respond(new DialerHandshake("other", "x").Hello, ["other"], "pc")!;
+        H.True(hs2.Finish(fake.Ok) == null, "hello_ok made without our secret");
+        H.True(hs2.Finish(a.Ok with { Epk = OtherEpk() }) == null, "tampered hello_ok");
+        return Task.CompletedTask;
+    }
+
+    public static Task ChannelTamper()
+    {
+        var hs = new DialerHandshake(V.Secret, "mac");
+        var a = ListenerHandshake.Respond(hs.Hello, [V.Secret], "pc")!;
+        var d = hs.Finish(a.Ok)!;
+        var m0 = d.Seal(ChannelKind.Control, "zero"u8)!; var m1 = d.Seal(ChannelKind.Control, "one"u8)!;
+        var flipped = (byte[])m0.Clone(); flipped[3] ^= 1;
+        H.True(new SecureChannel(new byte[32], new byte[32]).Open(m0) == null, "wrong key");
+        H.True(a.Channel.Open(flipped) == null, "bit flip");
+        H.True(a.Channel.Open(m1) == null, "out of order");
+        H.Eq("zero", Encoding.UTF8.GetString(a.Channel.Open(m0)!.Value.Payload), "in order");
+        H.True(a.Channel.Open(m0) == null, "replay");
+        H.Eq("one", Encoding.UTF8.GetString(a.Channel.Open(m1)!.Value.Payload), "next");
+        H.True(d.Open(m0) == null, "other direction's key");
+        H.True(d.Open(a.Channel.Seal(ChannelKind.Chunk, new byte[] { 9 })!)?.Payload.SequenceEqual(new byte[] { 9 }) == true, "each direction counts from 0");
+        H.True(a.Channel.Open(new byte[10]) == null, "too short");
+        return Task.CompletedTask;
+    }
+
+    static bool Contains(byte[] hay, string needle) => hay.AsSpan().IndexOf(Encoding.UTF8.GetBytes(needle)) >= 0;
+
+    /// <summary>Pair through the tap, send a marker and a patterned file both ways: none of it, and neither secret, is on the wire.</summary>
+    public static async Task WireCapture()
+    {
+        const string code = "QWERT67890";
+        var lc = new SessionConfig { Token = code, Name = "wire-l", DownloadDir = H.TempDir("wire-l"), RekeyOnPair = true, Advertise = ["10.9.8.7"] };
+        var (s, srec, port) = await H.Listener("wire-l", lc);
+        using var _ = s;
+        using var tap = new TapProxy(port);
+        var crec = new Recorder();
+        using var cli = new Session(new Role.Dial(["127.0.0.1"], tap.Port),
+            new SessionConfig { Token = code, Name = "wire-d", DownloadDir = H.TempDir("wire-d"), Backoff = [0.2, 0.4] }, crec.Add);
+        cli.Start();
+        await H.Until(() => srec.Connects == 1 && crec.Connects == 1, "connected through the tap", 5);
+        var secret = srec.All.OfType<SessionEvent.Rekeyed>().First().Token;
+        await H.Until(() => crec.All.OfType<SessionEvent.Rekeyed>().Any(r => r.Token == secret), "dialer got the secret", 5);
+        await H.Until(() => crec.All.OfType<SessionEvent.PeerAddresses>().Any(), "dialer got the addresses", 5);
+        var marker = "MARKER-" + Guid.NewGuid();
+        var dir = H.TempDir("wire-src");
+        var path = Path.Combine(dir, "secret-plans.txt");
+        File.WriteAllText(path, string.Concat(Enumerable.Repeat("LANLINE-PATTERN-", 40_000)));
+        var t1 = cli.SendText(marker); var f1 = cli.SendFile(path);
+        var t2 = s.SendText(marker); var f2 = s.SendFile(path);
+        await H.Until(() => crec.Delivered(t1.Id) && crec.Delivered(f1.Id) && srec.Delivered(t2.Id) && srec.Delivered(f2.Id), "delivered", 15);
+        var wire = tap.Captured;
+        H.True(wire.Length > 640_000, $"the tap saw the transfer ({wire.Length} bytes)");
+        H.True(Contains(wire, "\"hello_ok\""), "sanity: the tap sees plaintext (the listener's handshake)");
+        foreach (var (what, needle) in new[] { ("marker", marker), ("file content", "LANLINE-PATTERN"), ("file name", "secret-plans"),
+                                               ("pairing code", code), ("long-term secret", secret), ("address", "10.9.8.7") })
+            H.True(!Contains(wire, needle), $"{what} is readable on the wire");
+    }
+
+    public static async Task LiveTamper()
+    {
+        var (s, r, port) = await H.Listener("tamper");
+        using var _ = s;
+        using (var c = await RawClient.Connect(port))
+        {
+            await c.Hello();
+            await H.Until(() => r.Connects == 1, "connected");
+            await c.SendPlain(Enumerable.Repeat((byte)0x5a, 64).ToArray());
+            H.True(await c.NextNonBeat() == null, "closed on a forged message");
+            await H.Until(() => r.Disconnects.Contains("decrypt failed"), "decrypt failed", 5);
+        }
+        using (var c = await RawClient.Connect(port))
+        {
+            await c.Hello();
+            await c.SendPlain(Frame.TextItem("p", "in the clear"));
+            H.True(await c.NextNonBeat() == null, "closed on plaintext after the handshake");
+        }
+        H.Eq(0, r.Received.Count, "nothing received");
+    }
+
+    public static async Task WrongSecretDialer()
+    {
+        var (s, srec, port) = await H.Listener("wrong-l");
+        using var _ = s;
+        var crec = new Recorder();
+        using var cli = new Session(new Role.Dial(["127.0.0.1"], port),
+            new SessionConfig { Token = string.Concat(Enumerable.Repeat("cd", 32)), Name = "wrong-d", DownloadDir = H.TempDir("wrong-d"), Backoff = [0.2, 0.4] }, crec.Add);
+        cli.Start();
+        await H.Until(() => crec.All.OfType<SessionEvent.Status>().Any(x => x.Text == "Refused: the other computer doesn't know this pairing. Pair again."), "refusal", 5);
+        H.Eq(0, crec.Connects, "dialer never connected"); H.Eq(0, srec.Connects, "listener never connected");
     }
 }

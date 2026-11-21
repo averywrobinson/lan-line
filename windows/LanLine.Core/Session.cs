@@ -99,6 +99,7 @@ public sealed class Session : IDisposable
     Link? _link;
     bool _linkUp;
     Link? _dialing;
+    DialerHandshake? _dialHs;   // our half of the v2 handshake on _dialing
     int _hostIndex, _attempt, _redialGen;
     Timer? _timer;
     bool _stopped;
@@ -242,11 +243,25 @@ public sealed class Session : IDisposable
         switch (ev.Kind)
         {
             case LinkEventKind.Ready:
-                if (ReferenceEquals(l, _dialing)) l.SendText(Frame.Hello(_token, Config.Name).Json);
+                if (ReferenceEquals(l, _dialing))
+                {
+                    _dialHs = new DialerHandshake(_token, Config.Name);
+                    l.SendText(_dialHs.Hello.Json);
+                }
                 break;
             case LinkEventKind.Closed:
                 _pending.Remove(l);
-                if (ReferenceEquals(l, _dialing)) { _dialing = null; Emit(new SessionEvent.Status(ev.Reason ?? "dial failed")); ScheduleRedial(afterFailure: true); }
+                if (ReferenceEquals(l, _dialing))
+                {
+                    _dialing = null;
+                    // A v1 listener (beta.4 or older) closes on a v2 hello without a word.
+                    var reason = ev.Reason ?? "dial failed";
+                    if (_dialHs != null && (reason == "closed by peer" || reason.StartsWith("receive:")))
+                        reason = "Can't connect: update Lan-Line on the other computer too (it may run an older version).";
+                    _dialHs = null;
+                    Emit(new SessionEvent.Status(reason));
+                    ScheduleRedial(afterFailure: true);
+                }
                 if (isActive) LinkDown(ev.Reason ?? "closed");
                 break;
             case LinkEventKind.Text:
@@ -265,9 +280,18 @@ public sealed class Session : IDisposable
     {
         _pending.Remove(l);
         var f = Frame.Decode(s);
-        if (f is not { Type: "hello" } || f.V != Frame.ProtocolVersion || f.Token is null || !(Secrets.Equal(f.Token, _token) || (_oldToken != null && Secrets.Equal(f.Token, _oldToken))))
+        if (f is not { Type: "hello" }) { l.Close("bad hello"); return; }
+        if (f.V != LL2.Version)   // a beta.1…beta.4 peer: it sent the secret in the clear; tell it to update
         {
-            l.Close("bad hello");
+            Emit(new SessionEvent.Status("The other computer runs an older Lan-Line. Update it to connect."));
+            var v = f.V ?? 0;
+            l.SendText(Frame.Upgrade.Json, _ => l.Close($"peer speaks protocol v{v}"));
+            return;
+        }
+        var secrets = _oldToken != null ? new[] { _token, _oldToken } : new[] { _token };
+        if (ListenerHandshake.Respond(f, secrets, Config.Name) is not { } ans)
+        {
+            l.SendText(Frame.Refused.Json, _ => l.Close("bad hello"));
             return;
         }
         if (_link is { } old)   // a new authenticated peer replaces the old one
@@ -276,33 +300,53 @@ public sealed class Session : IDisposable
             old.Close("replaced");
         }
         string? rekey = null;
-        if (_rekeyOnPair && f.Rekey == "?")   // only peers that can save a new secret
+        var fresh = false;
+        if (_rekeyOnPair)
         {
             _rekeyOnPair = false;
             rekey = Secrets.NewToken();
+            fresh = true;
             _oldToken = _token;
             _token = rekey;
         }
-        l.SendText(Frame.HelloOk(Config.Name, rekey, Config.Advertise.Length > 0 ? Config.Advertise : null).Json);
-        if (rekey != null) Emit(new SessionEvent.Rekeyed(rekey));
+        else if (ans.SecretIndex == 1) rekey = _token;   // the dialer still has the pairing code: it missed the swap
+        l.SendText(ans.Ok.Json);
+        l.Secure = ans.Channel;   // everything after hello_ok is sealed
+        if (rekey != null) l.SendText(Frame.RekeyTo(rekey).Json);
+        if (Config.Advertise.Length > 0) l.SendText(Frame.Addresses(Config.Advertise).Json);
+        if (fresh) Emit(new SessionEvent.Rekeyed(rekey!));
         BecomeUp(l, f.Name ?? l.Peer);
     }
 
     void HandleHelloOk(string s, Link l)
     {
         var f = Frame.Decode(s);
-        if (f is not { Type: "hello_ok" }) { l.Close("expected hello_ok"); return; }
+        if (f is { Type: "error" })
+        {
+            _dialHs = null;
+            l.Close(f.Err switch
+            {
+                "upgrade" => "Can't connect: the other computer runs a newer Lan-Line. Update this one.",
+                "auth" => "Refused: the other computer doesn't know this pairing. Pair again.",
+                _ => $"Refused: {f.Err ?? "unknown error"}",
+            });
+            return;
+        }
+        if (f == null || _dialHs?.Finish(f) is not { } ch)
+        {
+            _dialHs = null;
+            l.Close("Refused: the other computer's reply doesn't match this pairing.");
+            return;
+        }
+        l.Secure = ch;
+        _dialHs = null;
         _dialing = null;
         _attempt = 0;
-        if (f.Rekey is { Length: 64 } r && r.All(Uri.IsHexDigit))
-        {
-            _token = r;
-            Emit(new SessionEvent.Rekeyed(r));
-        }
-        var addrs = (f.Addrs ?? []).Where(a => System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && a.Count(c => c == '.') == 3).Take(8).ToArray();
-        if (addrs.Length > 0) Emit(new SessionEvent.PeerAddresses(addrs));
         BecomeUp(l, f.Name ?? l.Peer);
     }
+
+    static bool IsIPv4(string a) =>
+        System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && a.Count(c => c == '.') == 3;
 
     void BecomeUp(Link l, string peer)
     {
@@ -372,6 +416,13 @@ public sealed class Session : IDisposable
             case "file_end" when f.Id != null && _in is { } file && file.Id == f.Id:
                 _in = null;
                 FinishFile(file, l);
+                break;
+            case "rekey" when Role is Role.Dial && f.Token is { Length: 64 } r && r.All(Uri.IsHexDigit):
+                if (r != _token) { _token = r; Emit(new SessionEvent.Rekeyed(r)); }
+                break;
+            case "addrs" when Role is Role.Dial:
+                var addrs = (f.Addrs ?? []).Where(IsIPv4).Take(8).ToArray();
+                if (addrs.Length > 0) Emit(new SessionEvent.PeerAddresses(addrs));
                 break;
             case "ack" when f.Id != null:
                 var i = _out.FindIndex(o => o.Item.Id == f.Id);

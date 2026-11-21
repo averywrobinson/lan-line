@@ -44,6 +44,14 @@ sealed partial class MainWindow : Window
     internal string PeerLabel => _peer.Length > 0 ? _peer : "your other computer";
     string Away => _peer.Length > 0 ? _peer : "partner";
 
+    /// <summary>Session diagnostics → the short line under the title. Version and pairing problems say what to do.</summary>
+    static string StatusLine(string s, string away) =>
+        s.StartsWith("dialing") ? $"Connecting to {away}…"
+        : s.StartsWith("Refused") ? $"{away} doesn't know this pairing: pair again"
+        : s.Contains("update Lan-Line on the other") || s.StartsWith("The other computer runs an older") ? $"Update Lan-Line on {away}"
+        : s.Contains("newer Lan-Line") ? "Update Lan-Line on this PC"
+        : $"Can't reach {away}";
+
     public MainWindow(string[] args, bool demo = false)
     {
         Title = "Lan-Line";
@@ -294,7 +302,7 @@ sealed partial class MainWindow : Window
             case SessionEvent.PeerAddresses pa: PeerAddresses(pa.Addrs); break;
             case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
             case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
-            case SessionEvent.Status s: if (!_connected) _statusText = s.Text.StartsWith("dialing") ? $"Connecting to {Away}…" : $"Can't reach {Away}"; break;
+            case SessionEvent.Status s: if (!_connected) _statusText = StatusLine(s.Text, Away); break;
             case SessionEvent.Received r:
                 Upsert(r.Item);
                 if (r.Item.IsFile && r.Item.Path is { } rp) LogReceived(rp, r.Item.Size);

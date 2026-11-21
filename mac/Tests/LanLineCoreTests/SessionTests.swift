@@ -31,11 +31,21 @@ final class SessionTests: XCTestCase {
         defer { srv.stop() }
         for bad in [String(repeating: "cd", count: 32), "short", ""] {
             let c = RawClient(port: port)
-            try? await c.send(.hello(token: bad, name: "evil"))
-            let reply = await c.next(timeout: 5)
-            XCTAssertNil(reply, "socket should close, got \(String(describing: reply))")
+            let reply = try await c.hello(token: bad, name: "evil")
+            XCTAssertEqual(reply?.type, "error"); XCTAssertEqual(reply?.err, "auth")
+            XCTAssertNil(c.channel)
+            let after = await c.next(timeout: 5)
+            XCTAssertNil(after, "socket should close, got \(String(describing: after))")
             c.close()
         }
+        // a v1 hello, even with the right secret, gets "upgrade" and is closed
+        let old = RawClient(port: port)
+        try await old.sendPlain(.legacyHello(token: testToken, name: "beta4"))
+        let up = await old.next(timeout: 5)
+        XCTAssertEqual(up?.type, "error"); XCTAssertEqual(up?.err, "upgrade"); XCTAssertEqual(up?.v, 2)
+        let gone = await old.next(timeout: 5)
+        XCTAssertNil(gone)
+        old.close()
         // a non-hello first frame is also refused
         let c = RawClient(port: port)
         try? await c.send(.text(id: "x", text: "hi"))
@@ -352,15 +362,22 @@ final class RekeyTests: XCTestCase {
         defer { srv.stop() }
         let c = RawClient(port: port)
         let ok = try await c.hello(token: "ABCDE12345")
+        XCTAssertEqual(ok?.type, "hello_ok"); XCTAssertNil(ok?.rekey, "v2 never puts the secret in hello_ok")
+        let rk = await c.nextNonBeat()          // it comes next, inside the encrypted channel
         c.close()
-        let newTok = try XCTUnwrap(ok?.rekey)
+        XCTAssertEqual(rk?.type, "rekey")
+        let newTok = try XCTUnwrap(rk?.token)
         XCTAssertEqual(newTok.count, 64)
         let c2 = RawClient(port: port); defer { c2.close() }
         let ok2 = try await c2.hello(token: newTok)
-        XCTAssertEqual(ok2?.type, "hello_ok"); XCTAssertNil(ok2?.rekey)   // only one rekey per pairing
+        XCTAssertEqual(ok2?.type, "hello_ok")
+        let none = await c2.nextNonBeat(timeout: 1)
+        XCTAssertEqual(none?.type, "timeout", "only one rekey per pairing")
         let c3 = RawClient(port: port); defer { c3.close() }
         let ok3 = try await c3.hello(token: "ABCDE12345")
         XCTAssertEqual(ok3?.type, "hello_ok")
+        let again = await c3.nextNonBeat()      // still on the code: it missed the swap, so it gets the secret again
+        XCTAssertEqual(again?.type, "rekey"); XCTAssertEqual(again?.token, newTok)
         let c4 = RawClient(port: port); defer { c4.close() }
         let bad = try? await c4.hello(token: "ZZZZZ99999")
         XCTAssertNotEqual((bad ?? nil)?.type, "hello_ok")

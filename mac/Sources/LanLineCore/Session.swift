@@ -117,6 +117,7 @@ public final class Session: @unchecked Sendable {
     private var linkUp = false
     private var peerName = ""
     private var dialing: Link?
+    private var dialHS: DialerHandshake?   // our half of the v2 handshake on `dialing`
     private var hostIndex = 0
     private var attempt = 0
     private var reconnect: DispatchWorkItem?
@@ -277,12 +278,20 @@ public final class Session: @unchecked Sendable {
         let isActive = (l === link)
         switch ev {
         case .ready:
-            if l === dialing { l.send(text: Frame.hello(token: token, name: config.name).json) }
+            if l === dialing {
+                let hs = DialerHandshake(secret: token, name: config.name)
+                dialHS = hs
+                l.send(text: hs.hello.json)
+            }
         case .closed(let reason):
             pending[ObjectIdentifier(l)] = nil
             if l === dialing {
                 dialing = nil
-                emit(.status(reason))
+                // A v1 listener (beta.4 or older) closes on a v2 hello without a word.
+                let hint = dialHS != nil && (reason == "closed by peer" || reason.hasPrefix("receive:"))
+                    ? "Can't connect: update Lan-Line on the other computer too (it may run an older version)." : reason
+                dialHS = nil
+                emit(.status(hint))
                 scheduleRedial(afterFailure: true)
             }
             if isActive { linkDown(reason) }
@@ -298,8 +307,16 @@ public final class Session: @unchecked Sendable {
 
     private func handleHello(_ s: String, on l: Link) {
         pending[ObjectIdentifier(l)] = nil
-        guard let f = Frame.decode(s), f.type == "hello", f.v == Frame.protocolVersion,
-              let tok = f.token, Secrets.equal(tok, token) || (oldToken.map { Secrets.equal(tok, $0) } ?? false) else {
+        guard let f = Frame.decode(s), f.type == "hello" else { l.close("bad hello"); return }
+        guard f.v == LL2.version else {   // a beta.1…beta.4 peer: it sent the secret in the clear; tell it to update
+            l.send(text: Frame.upgrade.json)
+            emit(.status("The other computer runs an older Lan-Line. Update it to connect."))
+            l.close("peer speaks protocol v\(f.v ?? 0)")
+            return
+        }
+        let secrets = [token] + (oldToken.map { [$0] } ?? [])
+        guard let ans = ListenerHandshake.answer(f, secrets: secrets, name: config.name) else {
+            l.send(text: Frame.refused.json)
             l.close("bad hello")
             return
         }
@@ -309,27 +326,44 @@ public final class Session: @unchecked Sendable {
             old.close("replaced")
         }
         var rekey: String?
-        if rekeyOnPair && f.rekey == "?" {   // only peers that can save a new secret
+        var fresh = false
+        if rekeyOnPair {
             rekeyOnPair = false
             rekey = Secrets.newToken()
+            fresh = true
             oldToken = token
             token = rekey!
+        } else if ans.secretIndex == 1 {   // the dialer still has the pairing code: it missed the swap, send it again
+            rekey = token
         }
-        l.send(text: Frame.helloOK(name: config.name, rekey: rekey, addrs: config.advertise.isEmpty ? nil : config.advertise).json)
-        if let rekey { emit(.rekeyed(token: rekey)) }
+        l.send(text: ans.ok.json)
+        l.channel = ans.channel            // everything after hello_ok is sealed
+        if let rekey { l.send(text: Frame.rekey(rekey).json) }
+        if !config.advertise.isEmpty { l.send(text: Frame.addresses(config.advertise).json) }
+        if fresh, let rekey { emit(.rekeyed(token: rekey)) }
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
 
     private func handleHelloOK(_ s: String, on l: Link) {
-        guard let f = Frame.decode(s), f.type == "hello_ok" else { l.close("expected hello_ok"); return }
+        guard let f = Frame.decode(s) else { l.close("expected hello_ok"); return }
+        if f.type == "error" {
+            switch f.err {
+            case "upgrade": l.close("Can't connect: the other computer runs a newer Lan-Line. Update this one.")
+            case "auth": l.close("Refused: the other computer doesn't know this pairing. Pair again.")
+            default: l.close("Refused: \(f.err ?? "unknown error")")
+            }
+            dialHS = nil
+            return
+        }
+        guard let hs = dialHS, let ch = hs.finish(f) else {
+            dialHS = nil
+            l.close("Refused: the other computer's reply doesn't match this pairing.")
+            return
+        }
+        l.channel = ch
+        dialHS = nil
         dialing = nil
         attempt = 0
-        if let r = f.rekey, r.count == 64, r.allSatisfy(\.isHexDigit) {
-            token = r
-            emit(.rekeyed(token: r))
-        }
-        let addrs = (f.addrs ?? []).filter(Self.isIPv4).prefix(8)
-        if !addrs.isEmpty { emit(.peerAddresses(Array(addrs))) }
         becomeUp(l, peer: f.name ?? l.peerDescription)
     }
 
@@ -404,6 +438,13 @@ public final class Session: @unchecked Sendable {
             guard let id = f.id, let file = inFile, file.id == id else { return }
             inFile = nil
             finishFile(file, on: l)
+        case "rekey":   // listener → dialer only, inside the encrypted channel
+            guard case .dialer = role, let r = f.token, r.count == 64, r.allSatisfy(\.isHexDigit) else { return }
+            if r != token { token = r; emit(.rekeyed(token: r)) }
+        case "addrs":
+            guard case .dialer = role else { return }
+            let addrs = (f.addrs ?? []).filter(Self.isIPv4).prefix(8)
+            if !addrs.isEmpty { emit(.peerAddresses(Array(addrs))) }
         case "ack":
             guard let id = f.id, let i = out.firstIndex(where: { $0.item.id == id }) else { return }
             var o = out.remove(at: i)

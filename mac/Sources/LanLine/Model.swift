@@ -69,7 +69,7 @@ final class AppModel {
         case .listening: status = "Waiting for \(away)…"
         case .connected(let p): connected = true; peer = p
         case .disconnected: connected = false; status = "Reconnecting…"
-        case .status(let s): if !connected { status = s.hasPrefix("dialing") ? "Connecting to \(away)…" : "Can't reach \(away)" }
+        case .status(let s): if !connected { status = Self.statusLine(s, away: away) }
         case .received(let item): upsert(item); onPopUp()
         case .outgoing(let item): upsert(item)
         case .receiveFailed(let name, let reason): note("Couldn't receive \(name): \(reason)"); onPopUp()
@@ -81,6 +81,15 @@ final class AppModel {
     func upsert(_ item: Item) {
         if let i = rows.firstIndex(where: { $0.id == item.id }) { rows[i].item = item; return }
         append(Row(id: item.id, item: item))
+    }
+
+    /// Session diagnostics → the short line under the title. Version and pairing problems say what to do.
+    static func statusLine(_ s: String, away: String) -> String {
+        if s.hasPrefix("dialing") { return "Connecting to \(away)…" }
+        if s.hasPrefix("Refused") { return "\(away) doesn't know this pairing: pair again" }
+        if s.contains("update Lan-Line on the other") || s.hasPrefix("The other computer runs an older") { return "Update Lan-Line on \(away)" }
+        if s.contains("newer Lan-Line") { return "Update Lan-Line on this Mac" }
+        return "Can't reach \(away)"
     }
 
     func note(_ s: String, fadeAfter: TimeInterval? = nil) {
