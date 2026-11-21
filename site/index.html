@@ -1,18 +1,14 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<html lang="en" class="dark scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lan-Line — Drop here. Grab there.</title>
-  <meta name="description" content="Two pinned desktop windows. One direct local bridge between Mac and Windows. Drop files, paste screenshots, or send text on one machine — grab them immediately on the other. Zero cloud." />
+  <meta name="description" content="Two pinned desktop windows, one direct local bridge between Mac and Windows. Drop files, paste screenshots, or send text on one machine and grab them on the other. Zero cloud. Public beta." />
   <link rel="canonical" href="https://lan-line.averywrobinson.com/" />
   <meta name="theme-color" content="#080A0F" />
-
-  <!-- Icons -->
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
-
-  <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://lan-line.averywrobinson.com/" />
   <meta property="og:title" content="Lan-Line — Drop here. Grab there." />
@@ -20,2009 +16,2293 @@
   <meta property="og:image" content="https://lan-line.averywrobinson.com/og-card.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-
-  <!-- Twitter / X Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Lan-Line — Drop here. Grab there." />
   <meta name="twitter:description" content="Two pinned desktop windows. One direct local bridge between Mac and Windows. Zero cloud, zero accounts." />
   <meta name="twitter:image" content="https://lan-line.averywrobinson.com/og-card.png" />
 
-  <!-- Typography -->
+  <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS: compiled ahead of time (tools/build-site-css.sh), same theme as the original inline config -->
+  <link rel="stylesheet" href="./tailwind.css" />
 
   <style>
+    /* =====================================================================
+       BASE & ATMOSPHERE
+       ===================================================================== */
     :root {
-      --bg-obsidian: #080A0F;
-      --bg-elevated: #0E121A;
-      --glass-surface: rgba(24, 29, 38, 0.72);
-      --glass-surface-strong: rgba(20, 25, 34, 0.86);
-      --glass-border: rgba(255, 255, 255, 0.11);
-      --glass-border-top: rgba(255, 255, 255, 0.24);
-      --bubble-out: rgba(68, 74, 86, 0.68);
-      --bubble-in: rgba(38, 59, 84, 0.78);
-      --emerald: #34D359;
-      --pin-coral: #E0463A;
-      --text-primary: #F8FAFC;
-      --text-secondary: #94A3B8;
-      --text-muted: #64748B;
-      --accent-mist: #93C5FD;
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      color-scheme: dark;
     }
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     html, body {
-      background-color: var(--bg-obsidian);
-      color: var(--text-primary);
-      font-family: var(--font-sans);
+      background-color: #080A0F;
+      color: #F8FAFC;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       overflow-x: hidden;
-      line-height: 1.55;
     }
 
-    /* Subtle 2% Film Grain Overlay */
+    /* Subtle 2% tactile grain texture rendered via inline SVG filter */
     .grain-overlay {
       position: fixed;
       inset: 0;
+      width: 100%;
+      height: 100%;
       pointer-events: none;
-      z-index: 60;
-      opacity: 0.025;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 40;
+      opacity: 0.028;
+      mix-blend-mode: overlay;
     }
 
-    /* Ambient Studio Lighting */
-    .studio-glow {
+    /* Restrained studio ambient radial glows behind glass windows */
+    .ambient-stage {
       position: absolute;
-      top: -120px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: min(1150px, 100vw);
-      height: 680px;
-      background:
-        radial-gradient(ellipse 46% 42% at 32% 52%, rgba(96, 148, 214, 0.17), transparent 72%),
-        radial-gradient(ellipse 46% 42% at 68% 52%, rgba(148, 163, 184, 0.14), transparent 72%),
-        radial-gradient(ellipse 35% 30% at 50% 42%, rgba(226, 232, 240, 0.08), transparent 70%);
-      filter: blur(24px);
+      inset: 0;
       pointer-events: none;
+      overflow: hidden;
       z-index: 0;
     }
 
-    .container {
-      width: 100%;
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 0 24px;
-      position: relative;
-      z-index: 2;
+    .glow-slate-left {
+      position: absolute;
+      top: 120px;
+      left: 50%;
+      transform: translateX(-78%);
+      width: 680px;
+      height: 520px;
+      background: radial-gradient(ellipse at center, rgba(100, 155, 225, 0.145) 0%, rgba(100, 155, 225, 0.045) 45%, transparent 72%);
+      filter: blur(44px);
     }
 
-    /* Navigation */
-    .nav {
-      position: sticky;
-      top: 0;
-      z-index: 40;
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
-      background: rgba(8, 10, 15, 0.72);
+    .glow-slate-right {
+      position: absolute;
+      top: 150px;
+      left: 50%;
+      transform: translateX(-20%);
+      width: 660px;
+      height: 500px;
+      background: radial-gradient(ellipse at center, rgba(118, 168, 232, 0.13) 0%, rgba(210, 225, 245, 0.045) 48%, transparent 72%);
+      filter: blur(48px);
+    }
+
+    .glow-silver-center {
+      position: absolute;
+      top: 300px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 520px;
+      height: 240px;
+      background: radial-gradient(ellipse at center, rgba(210, 225, 245, 0.075) 0%, rgba(100, 155, 225, 0.03) 55%, transparent 75%);
+      filter: blur(36px);
+    }
+
+    /* =====================================================================
+       TRUE SMOKED GLASSMORPHISM
+       ===================================================================== */
+    .smoked-glass {
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.01) 42%, rgba(8, 10, 15, 0.14) 100%),
+        rgba(20, 24, 32, 0.58);
+      backdrop-filter: blur(28px) saturate(140%);
+      -webkit-backdrop-filter: blur(28px) saturate(140%);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.03),
+        0 32px 72px -18px rgba(0, 0, 0, 0.82),
+        0 12px 28px -10px rgba(0, 0, 0, 0.55);
+    }
+
+    .smoked-glass-subtle {
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.008) 48%, rgba(8, 10, 15, 0.12) 100%),
+        rgba(20, 24, 32, 0.52);
+      backdrop-filter: blur(24px) saturate(135%);
+      -webkit-backdrop-filter: blur(24px) saturate(135%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.13),
+        0 20px 50px -16px rgba(0, 0, 0, 0.72);
+    }
+
+    .nav-glass {
+      background: rgba(11, 14, 20, 0.72);
+      backdrop-filter: blur(24px) saturate(145%);
+      -webkit-backdrop-filter: blur(24px) saturate(145%);
       border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     }
 
-    .nav-inner {
-      height: 64px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
+    /* Recessed glass input wells */
+    .recessed-input {
+      background: rgba(7, 9, 14, 0.52);
+      border: 1px solid rgba(255, 255, 255, 0.075);
+      box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.05);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
     }
 
-    .brand {
-      white-space: nowrap;
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: var(--text-primary);
-      font-weight: 600;
-      font-size: 16px;
-      letter-spacing: -0.02em;
+    .recessed-input:focus-within {
+      background: rgba(9, 12, 18, 0.72);
+      border-color: rgba(148, 185, 238, 0.34);
+      box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.48), 0 0 0 3px rgba(100, 155, 225, 0.1);
     }
 
-    .brand-mark {
-      width: 28px;
-      height: 16px;
-      display: inline-block;
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 28px;
-    }
-
-    .nav-links a {
-      white-space: nowrap;
-      color: var(--text-secondary);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 500;
-      transition: color 0.18s ease;
-    }
-
-    .nav-links a:hover { color: var(--text-primary); }
-
-    .nav-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .btn-ghost {
-      white-space: nowrap;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 8px 13px;
-      border-radius: 10px;
-      font-size: 13.5px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      text-decoration: none;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.03);
-      transition: all 0.18s ease;
-      cursor: pointer;
-    }
-
-    .btn-ghost:hover {
-      color: var(--text-primary);
-      border-color: rgba(255, 255, 255, 0.18);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 18px;
-      border-radius: 11px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #090C12;
-      background: linear-gradient(180deg, #FFFFFF 0%, #E2E8F0 100%);
-      border: 1px solid rgba(255, 255, 255, 0.65);
-      text-decoration: none;
-      box-shadow: 0 6px 24px rgba(147, 197, 253, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-      transition: transform 0.16s ease, box-shadow 0.16s ease;
-      cursor: pointer;
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 10px 30px rgba(147, 197, 253, 0.24), inset 0 1px 0 #FFFFFF;
-    }
-
-    .btn-glass {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 18px;
-      border-radius: 11px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-top-color: rgba(255, 255, 255, 0.22);
-      text-decoration: none;
-      backdrop-filter: blur(14px);
-      transition: all 0.18s ease;
-      cursor: pointer;
-    }
-
-    .btn-glass:hover {
-      background: rgba(255, 255, 255, 0.09);
-      border-color: rgba(255, 255, 255, 0.22);
-    }
-
-    /* Hero */
-    .hero {
-      position: relative;
-      padding: 72px 0 40px;
-      text-align: center;
-    }
-
-    .pill-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.045);
-      border: 1px solid rgba(255, 255, 255, 0.11);
-      border-top-color: rgba(255, 255, 255, 0.22);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: #CBD5E1;
-      margin-bottom: 24px;
-      backdrop-filter: blur(12px);
-    }
-
-    .dot-emerald {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--emerald);
-      box-shadow: 0 0 10px rgba(52, 211, 89, 0.75);
-      flex-shrink: 0;
-    }
-
-    .dot-idle {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #64748B;
-      flex-shrink: 0;
-    }
-
-    .hero h1 {
-      font-size: clamp(2.65rem, 5.8vw, 4.4rem);
-      font-weight: 700;
-      letter-spacing: -0.04em;
-      line-height: 1.06;
-      background: linear-gradient(180deg, #FFFFFF 20%, #CBD5E1 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 18px;
-    }
-
-    .hero-sub {
-      max-width: 610px;
-      margin: 0 auto 30px;
-      font-size: clamp(1rem, 1.8vw, 1.15rem);
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-
-    .hero-ctas {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 52px;
-    }
-
-    /* Dual-Window Smoked-Glass Simulator */
-    .simulator-stage {
-      position: relative;
-      margin: 0 auto;
-      max-width: 1020px;
-    }
-
-    .simulator-grid {
-      display: grid;
-      grid-template-columns: 1fr 112px 1fr;
-      align-items: center;
-      gap: 0;
-    }
-
-    .glass-window {
-      position: relative;
-      background: var(--glass-surface);
-      backdrop-filter: blur(28px) saturate(140%);
-      -webkit-backdrop-filter: blur(28px) saturate(140%);
-      border: 1px solid var(--glass-border);
-      border-top: 1px solid var(--glass-border-top);
-      box-shadow:
-        0 28px 70px rgba(0, 0, 0, 0.62),
-        0 2px 12px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
-      display: flex;
-      flex-direction: column;
-      height: 392px;
-      text-align: left;
-      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease, border-color 0.2s ease, box-shadow 0.25s ease;
-      overflow: hidden;
-    }
-
-    .glass-window.mac-win { border-radius: 18px; }
-    .glass-window.pc-win { border-radius: 12px; }
-
-    .glass-window.drag-over {
-      border-color: rgba(147, 197, 253, 0.68);
-      box-shadow:
-        0 28px 70px rgba(0, 0, 0, 0.62),
-        0 0 0 2px rgba(147, 197, 253, 0.3),
-        inset 0 0 36px rgba(147, 197, 253, 0.08);
-    }
-
-    .glass-window.waking {
-      animation: wakePop 0.48s cubic-bezier(0.22, 1, 0.36, 1);
-      border-color: rgba(52, 211, 89, 0.52);
-    }
-
-    @keyframes wakePop {
-      0% { transform: scale(0.94) translateY(14px); opacity: 0.4; }
-      60% { transform: scale(1.015) translateY(-2px); opacity: 1; }
-      100% { transform: scale(1) translateY(0); opacity: 1; }
-    }
-
-    .glass-window.minimized-state {
-      height: 76px;
-      opacity: 0.72;
-      justify-content: center;
-    }
-
-    .glass-window.minimized-state .win-messages,
-    .glass-window.minimized-state .win-input-bar {
-      display: none;
-    }
-
-    .win-titlebar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 14px 8px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      user-select: none;
-    }
-
-    .mac-lights {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      width: 60px;
-    }
-
-    .light-dot {
-      width: 11px;
-      height: 11px;
-      border-radius: 50%;
-      border: none;
-      cursor: pointer;
-      transition: filter 0.15s ease;
-    }
-
-    .light-dot:hover { filter: brightness(1.18); }
-    .light-red { background: #FF5F56; }
-    .light-yellow { background: #FFBD2E; }
-    .light-green { background: #27C93F; }
-
-    .win-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: #E2E8F0;
-      letter-spacing: -0.01em;
-    }
-
-    .win-right-controls {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      min-width: 60px;
-    }
-
-    .pin-btn {
-      background: transparent;
-      border: none;
-      color: #64748B;
-      cursor: pointer;
-      padding: 4px;
-      border-radius: 6px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.16s ease;
-    }
-
-    .pin-btn.pinned { color: var(--pin-coral); background: rgba(224, 70, 58, 0.12); }
-    .pin-btn:hover { background: rgba(255, 255, 255, 0.08); }
-
-    .pc-controls {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .pc-ctrl-btn {
-      width: 24px;
-      height: 22px;
-      border: none;
-      background: transparent;
-      color: #94A3B8;
-      border-radius: 5px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      font-size: 12px;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-
-    .pc-ctrl-btn:hover { background: rgba(255, 255, 255, 0.09); color: #FFFFFF; }
-
-    .win-status {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 14px;
-      font-family: var(--font-mono);
-      font-size: 11.5px;
-      color: #94A3B8;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.045);
-    }
-
-    .win-status-left {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .win-restore-btn {
-      display: none;
-      font-family: var(--font-sans);
-      font-size: 11.5px;
-      color: var(--accent-mist);
-      background: rgba(147, 197, 253, 0.1);
-      border: 1px solid rgba(147, 197, 253, 0.25);
-      border-radius: 6px;
-      padding: 2px 8px;
-      cursor: pointer;
-    }
-
-    .glass-window.minimized-state .win-restore-btn { display: inline-flex; }
-
-    .win-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(255,255,255,0.14) transparent;
-    }
-
-    .bubble {
-      max-width: 86%;
-      padding: 9px 12px;
-      border-radius: 12px;
-      font-size: 13px;
-      line-height: 1.45;
+    /* Message & File Bubbles inside Simulator */
+    .bubble-outgoing {
+      background: linear-gradient(180deg, rgba(68, 74, 86, 0.52) 0%, rgba(48, 53, 64, 0.48) 100%);
       border: 1px solid rgba(255, 255, 255, 0.09);
-      position: relative;
-      animation: bubbleIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 6px 16px -6px rgba(0, 0, 0, 0.45);
     }
 
+    .bubble-incoming {
+      background: linear-gradient(180deg, rgba(46, 74, 112, 0.58) 0%, rgba(32, 53, 82, 0.54) 100%);
+      border: 1px solid rgba(147, 197, 253, 0.18);
+      box-shadow: inset 0 1px 0 rgba(191, 219, 254, 0.18), 0 8px 20px -6px rgba(10, 20, 38, 0.55);
+    }
+
+    /* Subtle glass scrollbars */
+    .glass-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .glass-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .glass-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.11);
+      border-radius: 9999px;
+    }
+    .glass-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    /* =====================================================================
+       LUMINOUS CENTER FILAMENT & TRANSFER PULSES
+       ===================================================================== */
+    .filament-line-h {
+      height: 1px;
+      background: linear-gradient(
+        90deg,
+        rgba(148, 190, 245, 0.12) 0%,
+        rgba(196, 222, 255, 0.52) 50%,
+        rgba(148, 190, 245, 0.12) 100%
+      );
+    }
+
+    .filament-line-v {
+      width: 1px;
+      background: linear-gradient(
+        180deg,
+        rgba(148, 190, 245, 0.12) 0%,
+        rgba(196, 222, 255, 0.52) 50%,
+        rgba(148, 190, 245, 0.12) 100%
+      );
+    }
+
+    .filament-node {
+      background: #E2EEFF;
+      box-shadow:
+        0 0 0 3px rgba(147, 197, 253, 0.14),
+        0 0 14px 2px rgba(147, 197, 253, 0.65),
+        0 0 28px 4px rgba(100, 155, 225, 0.35);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .filament-node.active {
+      transform: scale(1.38);
+      box-shadow:
+        0 0 0 5px rgba(186, 230, 253, 0.26),
+        0 0 22px 4px rgba(186, 230, 253, 0.95),
+        0 0 42px 8px rgba(100, 155, 225, 0.55);
+    }
+
+    /* Directional transfer beam animations (~220ms) */
+    @keyframes beamLR {
+      0%   { transform: translateX(-110%) scaleX(0.6); opacity: 0; }
+      20%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { transform: translateX(220%) scaleX(1.25); opacity: 0; }
+    }
+
+    @keyframes beamRL {
+      0%   { transform: translateX(220%) scaleX(0.6); opacity: 0; }
+      20%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { transform: translateX(-110%) scaleX(1.25); opacity: 0; }
+    }
+
+    @keyframes beamTB {
+      0%   { transform: translateY(-110%) scaleY(0.6); opacity: 0; }
+      20%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { transform: translateY(220%) scaleY(1.25); opacity: 0; }
+    }
+
+    @keyframes beamBT {
+      0%   { transform: translateY(220%) scaleY(0.6); opacity: 0; }
+      20%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { transform: translateY(-110%) scaleY(1.25); opacity: 0; }
+    }
+
+    .pulse-h-lr {
+      animation: beamLR 230ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .pulse-h-rl {
+      animation: beamRL 230ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .pulse-v-tb {
+      animation: beamTB 230ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .pulse-v-bt {
+      animation: beamBT 230ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    /* Bubble entrance & Wake-on-Receive spring animations */
     @keyframes bubbleIn {
-      from { opacity: 0; transform: translateY(6px) scale(0.98); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
+      0% {
+        opacity: 0;
+        transform: translateY(7px) scale(0.975);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
     }
 
-    .bubble.out {
-      align-self: flex-end;
-      background: var(--bubble-out);
-      border-top-color: rgba(255, 255, 255, 0.16);
+    .animate-bubble-in {
+      animation: bubbleIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
-    .bubble.in {
-      align-self: flex-start;
-      background: var(--bubble-in);
-      border-color: rgba(147, 197, 253, 0.2);
-      border-top-color: rgba(147, 197, 253, 0.32);
+    @keyframes wakeSpring {
+      0% {
+        opacity: 0.35;
+        transform: translateY(14px) scale(0.94);
+      }
+      65% {
+        opacity: 1;
+        transform: translateY(-2px) scale(1.012);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
     }
 
-    .bubble-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    .animate-wake-spring {
+      animation: wakeSpring 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
-    .file-icon-box {
-      width: 30px;
-      height: 34px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.92);
-      color: #1E293B;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
+    /* Subtle live emerald pulse */
+    @keyframes subtleEmeraldPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.42), 0 0 8px rgba(52, 211, 153, 0.7); }
+      50%      { box-shadow: 0 0 0 4px rgba(52, 211, 153, 0), 0 0 10px rgba(52, 211, 153, 0.85); }
     }
 
-    .file-meta {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
+    .emerald-dot {
+      background-color: #34D399;
+      animation: subtleEmeraldPulse 2.8s ease-in-out infinite;
     }
 
-    .file-name {
-      font-weight: 500;
-      color: #F8FAFC;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 190px;
-    }
-
-    .file-size {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: #CBD5E1;
-      opacity: 0.78;
-    }
-
-    .bubble-actions {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      margin-left: auto;
-      padding-left: 6px;
-      flex-shrink: 0;
-    }
-
-    .copy-chip-btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: #CBD5E1;
-      border-radius: 6px;
-      width: 24px;
-      height: 24px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .copy-chip-btn:hover { background: rgba(255, 255, 255, 0.18); color: #FFFFFF; }
-    .copy-chip-btn.copied { color: var(--emerald); border-color: rgba(52, 211, 89, 0.45); background: rgba(52, 211, 89, 0.12); }
-
-    .check-mark {
-      font-size: 11px;
-      color: #CBD5E1;
-      opacity: 0.75;
-    }
-
-    .win-input-bar {
-      padding: 10px 12px;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(10, 13, 19, 0.42);
-    }
-
-    .win-input {
-      flex: 1;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.09);
-      border-radius: 9px;
-      padding: 8px 11px;
-      color: var(--text-primary);
-      font-family: var(--font-sans);
-      font-size: 12.5px;
-      outline: none;
-      transition: border-color 0.16s ease, background 0.16s ease;
-    }
-
-    .win-input::placeholder { color: #64748B; }
-    .win-input:focus {
-      border-color: rgba(147, 197, 253, 0.42);
-      background: rgba(255, 255, 255, 0.075);
-    }
-
-    .send-btn {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      background: rgba(255, 255, 255, 0.12);
-      color: #F8FAFC;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: all 0.16s ease;
-    }
-
-    .send-btn:hover { background: rgba(255, 255, 255, 0.24); transform: translateY(-1px); }
-
-    /* Center Luminous Filament */
-    .bridge-column {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      height: 120px;
-    }
-
-    .filament-track {
-      position: relative;
-      width: 100%;
-      height: 2px;
-      background: linear-gradient(90deg, rgba(148,163,184,0.22), rgba(186,230,253,0.75), rgba(148,163,184,0.22));
-      box-shadow: 0 0 14px rgba(147, 197, 253, 0.45);
-    }
-
-    .filament-core-dot {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #FFFFFF;
-      box-shadow: 0 0 12px 3px rgba(147, 197, 253, 0.85);
-    }
-
-    .filament-pulse {
-      position: absolute;
-      top: 50%;
-      left: 0;
-      width: 26px;
-      height: 4px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, transparent, #FFFFFF, transparent);
-      box-shadow: 0 0 16px 3px rgba(147, 197, 253, 0.95);
-      transform: translateY(-50%);
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .filament-pulse.pulse-right {
-      animation: pulseRight 0.46s cubic-bezier(0.25, 1, 0.5, 1);
-    }
-
-    .filament-pulse.pulse-left {
-      animation: pulseLeft 0.46s cubic-bezier(0.25, 1, 0.5, 1);
-    }
-
-    @keyframes pulseRight {
-      0% { left: -10%; opacity: 0; }
-      20% { opacity: 1; }
-      85% { opacity: 1; }
-      100% { left: 95%; opacity: 0; }
-    }
-
-    @keyframes pulseLeft {
-      0% { left: 95%; opacity: 0; }
-      20% { opacity: 1; }
-      85% { opacity: 1; }
-      100% { left: -10%; opacity: 0; }
-    }
-
-    .latency-badge {
-      margin-top: 14px;
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      color: #94A3B8;
-      background: rgba(15, 20, 29, 0.86);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 3px 8px;
-      border-radius: 999px;
-      white-space: nowrap;
-    }
-
-    /* Simulator Quick Actions */
-    .sim-toolbar {
-      margin-top: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .sim-pill-btn {
-      font-family: var(--font-sans);
-      font-size: 12.5px;
-      font-weight: 500;
-      color: #CBD5E1;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 999px;
-      padding: 7px 14px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      transition: all 0.16s ease;
-    }
-
-    .sim-pill-btn:hover {
-      background: rgba(255, 255, 255, 0.09);
-      border-color: rgba(255, 255, 255, 0.22);
-      color: #FFFFFF;
-    }
-
-    .sim-hint {
-      margin-top: 10px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* Sections */
-    .section {
-      padding: 96px 0 0;
-    }
-
-    .section-eyebrow {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--accent-mist);
-      margin-bottom: 12px;
-    }
-
-    .section-title {
-      font-size: clamp(1.85rem, 3.6vw, 2.65rem);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.15;
-      margin-bottom: 14px;
-    }
-
-    .section-lead {
-      max-width: 620px;
-      color: var(--text-secondary);
-      font-size: 16px;
-      line-height: 1.65;
-    }
-
-    /* Contrast Strip */
-    .contrast-grid {
-      margin-top: 36px;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-    }
-
-    .contrast-card {
-      background: rgba(255, 255, 255, 0.025);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-top-color: rgba(255, 255, 255, 0.15);
-      border-radius: 16px;
-      padding: 20px;
-    }
-
-    .contrast-old {
-      font-size: 12.5px;
-      font-family: var(--font-mono);
-      color: #64748B;
-      text-decoration: line-through;
-      margin-bottom: 8px;
-    }
-
-    .contrast-card h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: #F1F5F9;
-    }
-
-    .contrast-card p {
-      font-size: 13.5px;
-      color: var(--text-secondary);
-      line-height: 1.55;
-    }
-
-    /* Bento Grid with Specular Hover */
-    .bento-grid {
-      margin-top: 40px;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 18px;
-    }
-
+    /* =====================================================================
+       MOUSE-FOLLOWING SPECULAR BORDER GLOW (BENTO CARDS)
+       ===================================================================== */
     .bento-card {
       position: relative;
-      background: rgba(20, 25, 34, 0.66);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.09);
-      border-top: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 18px;
-      padding: 26px;
       overflow: hidden;
-      transition: border-color 0.2s ease, transform 0.2s ease;
+      --mouse-x: 50%;
+      --mouse-y: 0%;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
     }
 
     .bento-card::before {
       content: "";
       position: absolute;
       inset: 0;
-      background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 0%), rgba(147, 197, 253, 0.11), transparent 65%);
+      border-radius: inherit;
+      padding: 1px;
+      background: radial-gradient(
+        340px circle at var(--mouse-x) var(--mouse-y),
+        rgba(196, 222, 255, 0.42),
+        rgba(100, 155, 225, 0.14) 38%,
+        transparent 70%
+      );
+      -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
       opacity: 0;
-      transition: opacity 0.25s ease;
+      transition: opacity 0.28s ease;
       pointer-events: none;
     }
 
-    .bento-card:hover::before { opacity: 1; }
-    .bento-card:hover { border-color: rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
-
-    .bento-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 11px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 18px;
-      color: #E2E8F0;
-    }
-
-    .bento-card h3 {
-      font-size: 16.5px;
-      font-weight: 600;
-      letter-spacing: -0.015em;
-      margin-bottom: 8px;
-    }
-
-    .bento-card p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-
-    /* Steps */
-    .steps-grid {
-      margin-top: 38px;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-    }
-
-    .step-card {
-      background: rgba(255, 255, 255, 0.025);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 26px;
-    }
-
-    .step-num {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--emerald);
-      margin-bottom: 12px;
-      display: inline-block;
-    }
-
-    .step-card h3 {
-      font-size: 16.5px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    .step-card p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-
-    /* Download Card */
-    .download-card {
-      margin-top: 36px;
-      background: linear-gradient(180deg, rgba(26, 33, 46, 0.78) 0%, rgba(15, 19, 27, 0.88) 100%);
-      backdrop-filter: blur(26px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-top: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 24px;
-      padding: 44px;
-      display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
-      gap: 40px;
-      align-items: center;
-      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
-    }
-
-    .perks-list {
-      list-style: none;
-      display: grid;
-      gap: 10px;
-      margin: 20px 0 28px;
-    }
-
-    .perks-list li {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      color: #CBD5E1;
-    }
-
-    .download-btns {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
-    .cli-box {
-      background: rgba(7, 9, 14, 0.78);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      padding: 20px;
-    }
-
-    .cli-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 14px;
-    }
-
-    .cli-tab {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      padding: 5px 11px;
-      border-radius: 8px;
-      border: 1px solid transparent;
-      background: transparent;
-      color: #94A3B8;
-      cursor: pointer;
-    }
-
-    .cli-tab.active {
-      background: rgba(255, 255, 255, 0.09);
-      border-color: rgba(255, 255, 255, 0.14);
-      color: #FFFFFF;
-    }
-
-    .cli-code-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 10px;
-      padding: 12px 14px;
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      color: #E2E8F0;
-    }
-
-    .cli-links {
-      margin-top: 16px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-      font-size: 12.5px;
-    }
-
-    .cli-links a {
-      color: #94A3B8;
-      text-decoration: none;
-      transition: color 0.15s ease;
-    }
-
-    .cli-links a:hover { color: #FFFFFF; }
-
-    /* FAQ */
-    .faq-list {
-      margin-top: 32px;
-      display: grid;
-      gap: 12px;
-      max-width: 780px;
-    }
-
-    .faq-item {
-      background: rgba(255, 255, 255, 0.025);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 14px;
-      overflow: hidden;
-    }
-
-    .faq-q {
-      width: 100%;
-      text-align: left;
-      background: transparent;
-      border: none;
-      padding: 18px 22px;
-      color: var(--text-primary);
-      font-family: var(--font-sans);
-      font-size: 15.5px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      cursor: pointer;
-    }
-
-    .faq-plus {
-      font-family: var(--font-mono);
-      color: #94A3B8;
-      transition: transform 0.2s ease;
-    }
-
-    .faq-item.open .faq-plus { transform: rotate(45deg); color: #FFFFFF; }
-
-    .faq-a {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.26s ease;
-    }
-
-    .faq-item.open .faq-a { max-height: 220px; }
-
-    .faq-a p {
-      padding: 0 22px 20px;
-      color: var(--text-secondary);
-      font-size: 14.5px;
-      line-height: 1.65;
-    }
-
-    /* Footer */
-    footer {
-      margin-top: 110px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 36px 0 48px;
-    }
-
-    .footer-inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 20px;
-      font-size: 13.5px;
-      color: var(--text-muted);
-    }
-
-    .footer-links {
-      display: flex;
-      align-items: center;
-      gap: 22px;
-    }
-
-    .footer-links a {
-      color: var(--text-secondary);
-      text-decoration: none;
-      transition: color 0.16s ease;
-    }
-
-    .footer-links a:hover { color: #FFFFFF; }
-
-    /* Modal */
-    .modal-backdrop {
-      position: fixed;
+    .bento-card::after {
+      content: "";
+      position: absolute;
       inset: 0;
-      background: rgba(4, 6, 10, 0.72);
-      backdrop-filter: blur(12px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      z-index: 80;
-    }
-
-    .modal-backdrop.open { display: flex; }
-
-    .modal-card {
-      width: 100%;
-      max-width: 470px;
-      background: var(--glass-surface-strong);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      border-top-color: rgba(255, 255, 255, 0.28);
-      border-radius: 20px;
-      padding: 28px;
-      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
-      text-align: left;
-    }
-
-    .modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-
-    .modal-close {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #CBD5E1;
-      width: 30px;
-      height: 30px;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-
-    .modal-url-box {
-      margin: 16px 0 20px;
-      padding: 11px 12px;
-      background: rgba(8, 10, 15, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      font-family: var(--font-mono);
-      font-size: 11.5px;
-      color: #CBD5E1;
-      word-break: break-all;
-    }
-
-    /* Toast */
-    .toast {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%) translateY(16px);
-      background: rgba(18, 24, 34, 0.94);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      color: #F8FAFC;
-      padding: 10px 16px;
-      border-radius: 999px;
-      font-size: 13px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+      border-radius: inherit;
+      background: radial-gradient(
+        320px circle at var(--mouse-x) var(--mouse-y),
+        rgba(148, 190, 245, 0.085),
+        transparent 62%
+      );
       opacity: 0;
+      transition: opacity 0.28s ease;
       pointer-events: none;
-      transition: all 0.22s ease;
-      z-index: 90;
     }
 
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-    /* Beta notes: small and quiet */
-    .beta-tag {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      letter-spacing: 0.04em;
-      color: #FBBF24;
-      background: rgba(251, 191, 36, 0.10);
-      border: 1px solid rgba(251, 191, 36, 0.28);
-      border-radius: 999px;
-      padding: 1px 7px;
+    .bento-card:hover::before,
+    .bento-card:hover::after {
+      opacity: 1;
     }
 
-    .beta-note {
-      margin-top: 16px;
-      font-size: 13px;
-      line-height: 1.6;
-      color: var(--text-muted);
+    .bento-card:hover {
+      transform: translateY(-2px);
     }
 
-    .beta-note a { color: var(--text-secondary); }
-    .beta-note a:hover { color: var(--text-primary); }
-
-    .req-list {
-      list-style: none;
+    /* =====================================================================
+       SMOOTH FAQ ACCORDION
+       ===================================================================== */
+    .faq-content {
       display: grid;
-      gap: 8px;
-      margin-top: 16px;
-      font-size: 12.5px;
-      color: var(--text-secondary);
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+      opacity: 0;
     }
 
-    .req-list b { color: #E2E8F0; font-weight: 500; }
-
-    .platform-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin: 18px 0 14px;
+    .faq-item[data-open="true"] .faq-content {
+      grid-template-rows: 1fr;
+      opacity: 1;
     }
 
-    .platform-card {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 14px;
-      border-radius: 14px;
-      text-decoration: none;
-      color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-top-color: rgba(255, 255, 255, 0.22);
-      transition: background 0.16s ease, border-color 0.16s ease;
+    .faq-inner {
+      overflow: hidden;
     }
 
-    .platform-card:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.24); }
-    .platform-card .pc-name { font-weight: 600; font-size: 14.5px; }
-    .platform-card .pc-file { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
-    .platform-card.suggested { border-color: rgba(147, 197, 253, 0.45); }
-
-    /* Responsive */
-    @media (max-width: 960px) {
-      .simulator-grid {
-        grid-template-columns: 1fr;
-        max-width: 500px;
-        margin: 0 auto;
-      }
-      .bridge-column {
-        height: 68px;
-        flex-direction: row;
-        gap: 14px;
-      }
-      .filament-track {
-        width: 2px;
-        height: 56px;
-        background: linear-gradient(180deg, rgba(148,163,184,0.22), rgba(186,230,253,0.75), rgba(148,163,184,0.22));
-      }
-      .latency-badge { margin-top: 0; }
-      .contrast-grid { grid-template-columns: repeat(2, 1fr); }
-      .bento-grid { grid-template-columns: repeat(2, 1fr); }
-      .steps-grid { grid-template-columns: 1fr; }
-      .download-card { grid-template-columns: 1fr; padding: 30px; }
-      .platform-grid { grid-template-columns: 1fr; }
+    .faq-chevron {
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    @media (max-width: 900px) {
-      .nav-links { display: none; }
+    .faq-item[data-open="true"] .faq-chevron {
+      transform: rotate(45deg);
     }
 
-    @media (max-width: 640px) {
-      .contrast-grid, .bento-grid { grid-template-columns: 1fr; }
-      .hero { padding-top: 48px; }
+    /* Dropzone active glass glow */
+    .drop-overlay {
+      background: rgba(14, 22, 36, 0.76);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1.5px dashed rgba(147, 197, 253, 0.55);
+      box-shadow: inset 0 0 36px rgba(100, 155, 225, 0.16);
+    }
+
+    /* Subtle headline sheen */
+    .hero-gradient-text {
+      background: linear-gradient(180deg, #FFFFFF 22%, #CBD5E1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* Pin glow when active */
+    .pin-active {
+      color: #F8FAFC;
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
     }
   </style>
 </head>
-<body id="top">
-  <div class="grain-overlay" aria-hidden="true"></div>
+<body id="top" class="bg-obsidian text-[#F8FAFC] selection:bg-sky-400/25 selection:text-white">
 
-  <!-- Navigation -->
-  <header class="nav">
-    <div class="container nav-inner">
-      <a href="#top" class="brand" aria-label="Lan-Line home">
-        <svg class="brand-mark" viewBox="0 0 38 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="1.5" y="3.5" width="12" height="13" rx="3.2" stroke="#F8FAFC" stroke-width="1.8" />
-          <rect x="24.5" y="3.5" width="12" height="13" rx="3.2" stroke="#94A3B8" stroke-width="1.8" />
-          <line x1="14" y1="10" x2="24" y2="10" stroke="#E2E8F0" stroke-width="1.8" stroke-linecap="round" />
+  <!-- Inline SVG 2% Tactile Film Grain Overlay -->
+  <svg class="grain-overlay" aria-hidden="true">
+    <filter id="lanlineGrain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="3" stitchTiles="stitch" />
+      <feColorMatrix type="saturate" values="0" />
+    </filter>
+    <rect width="100%" height="100%" filter="url(#lanlineGrain)" />
+  </svg>
+
+  <!-- ===================================================================
+       1. STICKY FROSTED GLASS NAVBAR
+       =================================================================== -->
+  <header class="sticky top-0 z-50 nav-glass">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <!-- Left: Brand Logo -->
+      <a href="#top" class="flex items-center gap-2.5 group focus:outline-none">
+        <!-- Minimal geometric mark: two thin rounded squares joined by a horizontal dash -->
+        <svg width="34" height="18" viewBox="0 0 34 18" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-white transition-transform duration-200 group-hover:scale-[1.03]" aria-hidden="true">
+          <rect x="1" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.5" />
+          <line x1="12.5" y1="9" x2="21.5" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="opacity-85" />
+          <rect x="21.5" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.5" class="opacity-60 group-hover:opacity-95 transition-opacity duration-200" />
         </svg>
-        <span>Lan-Line</span>
-        <span class="beta-tag">BETA</span>
+        <span class="font-semibold text-[17px] tracking-[-0.03em] text-[#F8FAFC]">Lan-Line</span>
+        <span class="font-mono text-[10px] tracking-[0.08em] text-[#CBD5E1] px-1.5 py-[1px] rounded-full bg-white/[0.045] border border-white/[0.11]">BETA</span>
       </a>
 
-      <nav class="nav-links" aria-label="Primary">
-        <a href="#features">Features</a>
-        <a href="#how-it-works">How it works</a>
-        <a href="#download">Download</a>
-        <a href="#faq">FAQ</a>
-      </nav>
-
-      <div class="nav-actions">
-        <a class="btn-ghost" href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.38-5.26 5.67.42.36.79 1.07.79 2.15 0 1.55-.01 2.8-.01 3.18 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/>
+      <!-- Center: Navigation Links -->
+      <nav class="hidden md:flex items-center gap-7 text-[13.5px] font-medium text-[#94A3B8]" aria-label="Primary">
+        <a href="#live-demo" class="hover:text-[#F8FAFC] transition-colors">Live Demo</a>
+        <a href="#features" class="hover:text-[#F8FAFC] transition-colors">Features</a>
+        <a href="#how-it-works" class="hover:text-[#F8FAFC] transition-colors">How It Works</a>
+        <a href="#download" class="hover:text-[#F8FAFC] transition-colors">Download</a>
+        <a href="#faq" class="hover:text-[#F8FAFC] transition-colors">FAQ</a>
+        <a href="https://github.com/averywrobinson/lan-line"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="inline-flex items-center gap-1.5 text-[#CBD5E1] hover:text-[#F8FAFC] transition-colors">
+          <svg width="14.5" height="14.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
           </svg>
           <span>GitHub</span>
         </a>
-        <a class="btn-primary" href="#download">Download</a>
+      </nav>
+
+      <!-- Right: Mobile GitHub Link + Download CTA -->
+      <div class="flex items-center gap-2.5">
+        <a href="https://github.com/averywrobinson/lan-line"
+           target="_blank"
+           rel="noopener noreferrer"
+           aria-label="View Lan-Line on GitHub"
+           class="md:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-[12.5px] font-medium text-[#CBD5E1] hover:text-white bg-white/[0.045] border border-white/[0.09] transition-colors">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+          </svg>
+          <span>GitHub</span>
+        </a>
+
+        <a href="#download"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[0_1px_2px_rgba(0,0,0,0.4),0_0_24px_rgba(248,250,252,0.12)] active:scale-[0.98] transition-all">
+          <span>Download</span>
+        </a>
       </div>
     </div>
   </header>
 
-  <main>
-    <!-- Hero + Live Bridge Simulator -->
-    <section class="hero">
-      <div class="studio-glow" aria-hidden="true"></div>
-      <div class="container">
-        <div class="pill-badge">
-          <span class="dot-emerald"></span>
-          <span>Public beta · macOS &amp; Windows · Local LAN</span>
+  <main class="relative">
+    <!-- Subtle Studio Ambient Glows behind Hero & Simulator -->
+    <div class="ambient-stage" aria-hidden="true">
+      <div class="glow-slate-left"></div>
+      <div class="glow-slate-right"></div>
+      <div class="glow-silver-center"></div>
+    </div>
+
+    <!-- =================================================================
+         2. HERO SECTION + WORKING TWO-WINDOW INTERACTIVE SIMULATOR
+         ================================================================= -->
+    <section class="relative z-10 pt-14 sm:pt-20 pb-20 sm:pb-24 px-4 sm:px-6 lg:px-8">
+      <div class="max-w-6xl mx-auto">
+
+        <!-- Hero Header Copy -->
+        <div class="text-center max-w-2xl mx-auto">
+          <!-- Eyebrow Pill -->
+          <div class="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] mb-7">
+            <span class="w-2 h-2 rounded-full emerald-dot shrink-0"></span>
+            <span class="font-mono text-[11.5px] tracking-[0.01em] text-[#CBD5E1]">macOS &amp; Windows · Local LAN · Zero Cloud</span>
+          </div>
+
+          <!-- Display Headline -->
+          <h1 class="hero-gradient-text font-semibold text-4xl sm:text-6xl lg:text-[64px] leading-[1.04] tracking-tighterDisplay mb-6">
+            Drop here. Grab there.
+          </h1>
+
+          <!-- Subheadline -->
+          <p class="text-[16px] sm:text-[18px] leading-[1.6] text-[#94A3B8] font-normal max-w-[590px] mx-auto mb-9">
+            Two pinned windows—one on your Mac, one on your PC. Drop files, paste screenshots, or send snippets across your desk over your local network. Instant, private, and both directions.
+          </p>
+
+          <!-- Hero CTA Row -->
+          <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-14 sm:mb-16">
+            <a href="#download"
+               class="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_32px_-8px_rgba(248,250,252,0.22)] active:scale-[0.985] transition-all">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download Lan-Line</span>
+            </a>
+
+            <button type="button" id="focusBridgeBtn"
+                    class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[14.5px] font-medium text-[#E2E8F0] bg-white/[0.045] hover:bg-white/[0.08] border border-white/[0.11] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] active:scale-[0.985] transition-all">
+              <span>Test Live Bridge</span>
+              <span class="text-[#94A3B8]" aria-hidden="true">↓</span>
+            </button>
+          </div>
         </div>
 
-        <h1>Drop here. Grab there.</h1>
-        <p class="hero-sub">
-          Lan-Line is a tiny, pinned smoked-glass window on both of your computers. Drop a file, paste a screenshot, or send a link on one machine — it lands on the other instantly.
-        </p>
+        <!-- ===============================================================
+             CENTERPIECE INTERACTIVE TWO-WINDOW SIMULATOR
+             =============================================================== -->
+        <div id="live-demo" class="scroll-mt-24">
+          <div class="relative flex flex-col lg:flex-row items-stretch lg:items-center justify-center gap-0">
 
-        <div class="hero-ctas">
-          <button type="button" class="btn-primary" data-open-modal="macOS & Windows">
-            Download Lan-Line
-          </button>
-          <a href="#features" class="btn-glass">Explore features</a>
-        </div>
+            <!-- ===========================================================
+                 LEFT WINDOW: macOS SMOKED GLASS
+                 =========================================================== -->
+            <div class="w-full lg:w-[44%] flex flex-col items-center justify-center min-h-[395px] sm:min-h-[415px]">
 
-        <!-- Interactive Dual-Window Simulator -->
-        <div class="simulator-stage" aria-label="Interactive two-window Lan-Line simulator">
-          <div class="simulator-grid">
-            <!-- macOS Window -->
-            <div class="glass-window mac-win" id="win-mac" data-side="mac">
-              <div class="win-titlebar">
-                <div class="mac-lights">
-                  <button type="button" class="light-dot light-red" title="Clear feed" data-action="clear"></button>
-                  <button type="button" class="light-dot light-yellow" title="Minimize window" data-minimize="mac"></button>
-                  <button type="button" class="light-dot light-green" title="Restore window" data-restore="mac"></button>
+              <!-- Active macOS Window -->
+              <div id="macWindow"
+                   tabindex="0"
+                   data-side="mac"
+                   aria-label="Lan-Line macOS Window"
+                   class="relative w-full smoked-glass rounded-[18px] overflow-hidden flex flex-col transition-all duration-300 focus:outline-none focus:ring-1 focus:ring-sky-300/30">
+
+                <!-- Drag-and-Drop Frosted Overlay -->
+                <div id="macDropOverlay" class="hidden absolute inset-2.5 z-30 rounded-[13px] drop-overlay flex-col items-center justify-center gap-2 pointer-events-none">
+                  <div class="w-10 h-10 rounded-xl bg-sky-400/15 border border-sky-300/30 flex items-center justify-center text-sky-200">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </div>
+                  <p class="text-[13.5px] font-medium text-white">Drop to send to Studio PC</p>
+                  <p class="font-mono text-[11px] text-sky-200/75">Direct LAN · :47830</p>
                 </div>
-                <span class="win-title">Lan-Line</span>
-                <div class="win-right-controls">
-                  <button type="button" class="pin-btn pinned" title="Toggle Always-on-Top" data-pin="mac" aria-label="Pin macOS window">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div class="win-status">
-                <div class="win-status-left">
-                  <span class="dot-emerald" id="dot-mac"></span>
-                  <span id="status-mac">Connected · Studio PC</span>
-                </div>
-                <button type="button" class="win-restore-btn" data-restore="mac">Restore</button>
-              </div>
-              <div class="win-messages" id="feed-mac"></div>
-              <form class="win-input-bar" data-form="mac">
-                <input type="text" class="win-input" id="input-mac" placeholder="Type, paste screenshot, or drop file…" autocomplete="off" />
-                <button type="submit" class="send-btn" aria-label="Send from Mac">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-                </button>
-              </form>
-            </div>
 
-            <!-- Luminous Filament -->
-            <div class="bridge-column" aria-hidden="true">
-              <div class="filament-track">
-                <span class="filament-core-dot"></span>
-                <span class="filament-pulse" id="filament-pulse"></span>
-              </div>
-              <span class="latency-badge" id="latency-badge">direct · LAN</span>
-            </div>
+                <!-- macOS Titlebar -->
+                <div class="px-4 pt-3.5 pb-2.5 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.015]">
+                  <!-- Traffic Lights -->
+                  <div class="flex items-center gap-2 w-20">
+                    <button type="button" onclick="showToast('Close disabled in live web demo — try Minimize (yellow)')" title="Close"
+                            class="w-3 h-3 rounded-full bg-[#FF5F57]/90 hover:bg-[#FF5F57] border border-black/25 flex items-center justify-center group transition-transform active:scale-90">
+                      <span class="sr-only">Close macOS window</span>
+                    </button>
+                    <button type="button" id="macMinBtn" title="Minimize Mac window (test Wake-on-Receive)"
+                            class="w-3 h-3 rounded-full bg-[#FEBC2E]/90 hover:bg-[#FEBC2E] border border-black/25 flex items-center justify-center group transition-transform active:scale-90">
+                      <span class="sr-only">Minimize macOS window</span>
+                    </button>
+                    <button type="button" onclick="focusInput('mac')" title="Focus macOS window"
+                            class="w-3 h-3 rounded-full bg-[#28C840]/90 hover:bg-[#28C840] border border-black/25 flex items-center justify-center group transition-transform active:scale-90">
+                      <span class="sr-only">Expand macOS window</span>
+                    </button>
+                  </div>
 
-            <!-- Windows 11 Window -->
-            <div class="glass-window pc-win" id="win-pc" data-side="pc">
-              <div class="win-titlebar">
-                <span class="win-title">Lan-Line</span>
-                <div class="win-right-controls">
-                  <button type="button" class="pin-btn pinned" title="Toggle Always-on-Top" data-pin="pc" aria-label="Pin Windows window">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
-                  </button>
-                  <div class="pc-controls">
-                    <button type="button" class="pc-ctrl-btn" title="Minimize" data-minimize="pc">—</button>
-                    <button type="button" class="pc-ctrl-btn" title="Restore" data-restore="pc">□</button>
-                    <button type="button" class="pc-ctrl-btn" title="Clear feed" data-action="clear">×</button>
+                  <!-- Centered Title -->
+                  <div class="flex items-center gap-2">
+                    <span class="text-[13px] font-medium tracking-[-0.01em] text-[#E2E8F0]">Lan-Line</span>
+                    <span id="macWakeBadge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-400/15 text-emerald-300 border border-emerald-400/30">Woke on arrival</span>
+                  </div>
+
+                  <!-- Pin Button -->
+                  <div class="w-20 flex justify-end">
+                    <button type="button" id="macPinBtn" data-pinned="true" title="Toggle Always on Top"
+                            class="pin-active p-1.5 rounded-lg border border-transparent text-[#94A3B8] hover:text-white transition-all">
+                      <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="17" x2="12" y2="22" />
+                        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
-              </div>
-              <div class="win-status">
-                <div class="win-status-left">
-                  <span class="dot-emerald" id="dot-pc"></span>
-                  <span id="status-pc">Connected · MacBook Pro</span>
+
+                <!-- macOS Status Bar -->
+                <div class="px-4 py-2 flex items-center justify-between text-[11.5px] border-b border-white/[0.045] bg-black/[0.12]">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full emerald-dot"></span>
+                    <span class="text-[#CBD5E1] font-medium">Connected</span>
+                    <span class="text-[#64748B]">·</span>
+                    <span class="text-[#94A3B8]">Studio PC</span>
+                  </div>
+                  <span class="font-mono text-[10.5px] text-[#64748B]">macOS · :47830</span>
                 </div>
-                <button type="button" class="win-restore-btn" data-restore="pc">Restore</button>
+
+                <!-- macOS Message/File Feed -->
+                <div id="macFeed" class="h-[252px] sm:h-[268px] overflow-y-auto glass-scroll px-4 py-4 flex flex-col gap-2.5">
+                  <!-- Populated via JS -->
+                </div>
+
+                <!-- macOS Bottom Recessed Input Bar -->
+                <div class="px-3.5 py-3 border-t border-white/[0.055] bg-black/[0.14]">
+                  <form id="macForm" class="recessed-input rounded-xl px-2.5 py-1.5 flex items-center gap-2">
+                    <input type="file" id="macFileInput" class="hidden" multiple />
+                    <button type="button" onclick="document.getElementById('macFileInput').click()" title="Attach file from Mac"
+                            class="p-1.5 rounded-lg text-[#94A3B8] hover:text-white hover:bg-white/[0.07] transition-colors shrink-0">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                      </svg>
+                    </button>
+                    <input id="macInput" type="text" autocomplete="off"
+                           placeholder="Type, paste image, or drop file…"
+                           class="w-full bg-transparent text-[13px] text-[#F8FAFC] placeholder-[#64748B] focus:outline-none py-1" />
+                    <button type="submit" title="Send to Studio PC"
+                            class="w-7 h-7 rounded-full bg-white/[0.14] hover:bg-[#F8FAFC] text-[#E2E8F0] hover:text-[#080A0F] flex items-center justify-center shrink-0 transition-all active:scale-90">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="19" x2="12" y2="5" />
+                        <polyline points="5 12 12 5 19 12" />
+                      </svg>
+                    </button>
+                  </form>
+                </div>
               </div>
-              <div class="win-messages" id="feed-pc"></div>
-              <form class="win-input-bar" data-form="pc">
-                <input type="text" class="win-input" id="input-pc" placeholder="Type, paste screenshot, or drop file…" autocomplete="off" />
-                <button type="submit" class="send-btn" aria-label="Send from Windows">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+
+              <!-- Minimized macOS Dock Pill -->
+              <div id="macMinimizedPill" class="hidden w-full max-w-[300px] smoked-glass rounded-full px-4 py-2.5 flex items-center justify-between gap-3 animate-bubble-in">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="w-2 h-2 rounded-full emerald-dot shrink-0"></span>
+                  <div class="truncate">
+                    <p class="text-[12.5px] font-medium text-[#F8FAFC] truncate">Lan-Line · MacBook Pro</p>
+                    <p class="font-mono text-[10px] text-[#94A3B8]">Minimized · Listening on :47830</p>
+                  </div>
+                </div>
+                <button type="button" id="macRestoreBtn"
+                        class="px-3 py-1.5 rounded-full text-[11.5px] font-medium bg-white/[0.09] hover:bg-white/[0.16] text-white border border-white/[0.1] transition-colors shrink-0">
+                  Restore
                 </button>
-              </form>
+              </div>
+            </div>
+
+            <!-- ===========================================================
+                 CENTER LUMINOUS BRIDGE (HORIZONTAL DESKTOP / VERTICAL MOBILE)
+                 =========================================================== -->
+            <div class="relative flex lg:flex-col items-center justify-center w-full lg:w-[12%] h-16 lg:h-auto shrink-0 my-1 lg:my-0 select-none" aria-hidden="true">
+
+              <!-- Desktop Horizontal Filament -->
+              <div class="hidden lg:flex relative w-full items-center justify-center">
+                <div class="w-full filament-line-h relative overflow-hidden">
+                  <!-- Left-to-Right Pulse -->
+                  <div id="pulseHLR" class="opacity-0 absolute top-0 left-0 h-[2px] w-14 -mt-[0.5px] rounded-full bg-gradient-to-r from-transparent via-sky-200 to-white shadow-[0_0_14px_2px_rgba(186,230,253,0.95)]"></div>
+                  <!-- Right-to-Left Pulse -->
+                  <div id="pulseHRL" class="opacity-0 absolute top-0 left-0 h-[2px] w-14 -mt-[0.5px] rounded-full bg-gradient-to-l from-transparent via-sky-200 to-white shadow-[0_0_14px_2px_rgba(186,230,253,0.95)]"></div>
+                </div>
+
+                <!-- Glowing Center Node -->
+                <div id="filamentNodeH" class="filament-node absolute w-2 h-2 rounded-full"></div>
+
+                <!-- Monospace Live Latency Micro-Badge -->
+                <div id="latencyBadgeH"
+                     class="absolute -top-9 whitespace-nowrap px-2.5 py-1 rounded-full bg-[#0F172A]/90 border border-sky-300/25 shadow-[0_4px_16px_rgba(0,0,0,0.6)] font-mono text-[10.5px] text-sky-200 opacity-0 translate-y-1 transition-all duration-200 pointer-events-none">
+                  0.7 ms · LAN
+                </div>
+              </div>
+
+              <!-- Mobile/Tablet Vertical Filament -->
+              <div class="flex lg:hidden relative h-full items-center justify-center">
+                <div class="h-full filament-line-v relative overflow-hidden">
+                  <!-- Top-to-Bottom Pulse (Mac -> PC) -->
+                  <div id="pulseVTB" class="opacity-0 absolute left-0 top-0 w-[2px] h-8 -ml-[0.5px] rounded-full bg-gradient-to-b from-transparent via-sky-200 to-white shadow-[0_0_14px_2px_rgba(186,230,253,0.95)]"></div>
+                  <!-- Bottom-to-Top Pulse (PC -> Mac) -->
+                  <div id="pulseVBT" class="opacity-0 absolute left-0 top-0 w-[2px] h-8 -ml-[0.5px] rounded-full bg-gradient-to-t from-transparent via-sky-200 to-white shadow-[0_0_14px_2px_rgba(186,230,253,0.95)]"></div>
+                </div>
+
+                <!-- Glowing Center Node -->
+                <div id="filamentNodeV" class="filament-node absolute w-2 h-2 rounded-full"></div>
+
+                <!-- Monospace Live Latency Micro-Badge (Mobile) -->
+                <div id="latencyBadgeV"
+                     class="absolute left-6 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-[#0F172A]/90 border border-sky-300/25 font-mono text-[10.5px] text-sky-200 opacity-0 -translate-x-1 transition-all duration-200 pointer-events-none">
+                  0.7 ms · LAN
+                </div>
+              </div>
+            </div>
+
+            <!-- ===========================================================
+                 RIGHT WINDOW: WINDOWS 11 FLUENT SMOKED GLASS
+                 =========================================================== -->
+            <div class="w-full lg:w-[44%] flex flex-col items-center justify-center min-h-[395px] sm:min-h-[415px]">
+
+              <!-- Active Windows 11 Window -->
+              <div id="pcWindow"
+                   tabindex="0"
+                   data-side="pc"
+                   aria-label="Lan-Line Windows 11 Window"
+                   class="relative w-full smoked-glass rounded-[12px] overflow-hidden flex flex-col transition-all duration-300 focus:outline-none focus:ring-1 focus:ring-sky-300/30">
+
+                <!-- Drag-and-Drop Frosted Overlay -->
+                <div id="pcDropOverlay" class="hidden absolute inset-2.5 z-30 rounded-[8px] drop-overlay flex-col items-center justify-center gap-2 pointer-events-none">
+                  <div class="w-10 h-10 rounded-lg bg-sky-400/15 border border-sky-300/30 flex items-center justify-center text-sky-200">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </div>
+                  <p class="text-[13.5px] font-medium text-white">Drop to send to MacBook Pro</p>
+                  <p class="font-mono text-[11px] text-sky-200/75">Direct LAN · :47830</p>
+                </div>
+
+                <!-- Windows 11 Fluent Titlebar -->
+                <div class="pl-4 pr-2 pt-2.5 pb-2.5 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.015]">
+                  <!-- Left Title + Wake Badge -->
+                  <div class="flex items-center gap-2.5">
+                    <svg width="20" height="11" viewBox="0 0 34 18" fill="none" class="text-[#94A3B8]" aria-hidden="true">
+                      <rect x="1" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.8" />
+                      <line x1="12.5" y1="9" x2="21.5" y2="9" stroke="currentColor" stroke-width="1.8" />
+                      <rect x="21.5" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.8" opacity="0.65" />
+                    </svg>
+                    <span class="text-[13px] font-medium tracking-[-0.01em] text-[#E2E8F0]">Lan-Line</span>
+                    <span id="pcWakeBadge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-400/15 text-emerald-300 border border-emerald-400/30">Woke on arrival</span>
+                  </div>
+
+                  <!-- Right Pin + Windows 11 Vector Caption Buttons -->
+                  <div class="flex items-center gap-1">
+                    <button type="button" id="pcPinBtn" data-pinned="true" title="Toggle Always on Top"
+                            class="pin-active p-1.5 mr-1 rounded-md border border-transparent text-[#94A3B8] hover:text-white transition-all">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="17" x2="12" y2="22" />
+                        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+                      </svg>
+                    </button>
+
+                    <!-- Minimize -->
+                    <button type="button" id="pcMinBtn" title="Minimize PC window (test Wake-on-Receive)"
+                            class="w-8 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-white hover:bg-white/[0.08] transition-colors">
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+                        <line x1="1.5" y1="6.5" x2="10.5" y2="6.5" />
+                      </svg>
+                    </button>
+
+                    <!-- Maximize -->
+                    <button type="button" onclick="focusInput('pc')" title="Focus Windows window"
+                            class="w-8 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-white hover:bg-white/[0.08] transition-colors">
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
+                        <rect x="1.75" y="1.75" width="8.5" height="8.5" rx="1.2" />
+                      </svg>
+                    </button>
+
+                    <!-- Close -->
+                    <button type="button" onclick="showToast('Close disabled in live web demo — try Minimize (−)')" title="Close"
+                            class="w-8 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-white hover:bg-rose-500/75 transition-colors">
+                      <svg width="10.5" height="10.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" aria-hidden="true">
+                        <line x1="2.2" y1="2.2" x2="9.8" y2="9.8" />
+                        <line x1="9.8" y1="2.2" x2="2.2" y2="9.8" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Windows Status Bar -->
+                <div class="px-4 py-2 flex items-center justify-between text-[11.5px] border-b border-white/[0.045] bg-black/[0.12]">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full emerald-dot"></span>
+                    <span class="text-[#CBD5E1] font-medium">Connected</span>
+                    <span class="text-[#64748B]">·</span>
+                    <span class="text-[#94A3B8]">MacBook Pro</span>
+                  </div>
+                  <span class="font-mono text-[10.5px] text-[#64748B]">Windows 11 · :47830</span>
+                </div>
+
+                <!-- Windows Message/File Feed -->
+                <div id="pcFeed" class="h-[252px] sm:h-[268px] overflow-y-auto glass-scroll px-4 py-4 flex flex-col gap-2.5">
+                  <!-- Populated via JS -->
+                </div>
+
+                <!-- Windows Bottom Recessed Input Bar -->
+                <div class="px-3.5 py-3 border-t border-white/[0.055] bg-black/[0.14]">
+                  <form id="pcForm" class="recessed-input rounded-[9px] px-2.5 py-1.5 flex items-center gap-2">
+                    <input type="file" id="pcFileInput" class="hidden" multiple />
+                    <button type="button" onclick="document.getElementById('pcFileInput').click()" title="Attach file from Studio PC"
+                            class="p-1.5 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/[0.07] transition-colors shrink-0">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                      </svg>
+                    </button>
+                    <input id="pcInput" type="text" autocomplete="off"
+                           placeholder="Send back to MacBook Pro…"
+                           class="w-full bg-transparent text-[13px] text-[#F8FAFC] placeholder-[#64748B] focus:outline-none py-1" />
+                    <button type="submit" title="Send to MacBook Pro"
+                            class="w-7 h-7 rounded-full bg-white/[0.14] hover:bg-[#F8FAFC] text-[#E2E8F0] hover:text-[#080A0F] flex items-center justify-center shrink-0 transition-all active:scale-90">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="19" x2="12" y2="5" />
+                        <polyline points="5 12 12 5 19 12" />
+                      </svg>
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <!-- Minimized Windows 11 Taskbar Pill -->
+              <div id="pcMinimizedPill" class="hidden w-full max-w-[300px] smoked-glass rounded-[10px] px-4 py-2.5 flex items-center justify-between gap-3 animate-bubble-in">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="w-2 h-2 rounded-full emerald-dot shrink-0"></span>
+                  <div class="truncate">
+                    <p class="text-[12.5px] font-medium text-[#F8FAFC] truncate">Lan-Line · Studio PC</p>
+                    <p class="font-mono text-[10px] text-[#94A3B8]">Minimized to tray · Ready</p>
+                  </div>
+                </div>
+                <button type="button" id="pcRestoreBtn"
+                        class="px-3 py-1.5 rounded-md text-[11.5px] font-medium bg-white/[0.09] hover:bg-white/[0.16] text-white border border-white/[0.1] transition-colors shrink-0">
+                  Restore
+                </button>
+              </div>
             </div>
           </div>
 
-          <!-- Interactive Simulator Toolbar -->
-          <div class="sim-toolbar">
-            <button type="button" class="sim-pill-btn" id="btn-sample-img">Paste Screenshot (Mac → PC)</button>
-            <button type="button" class="sim-pill-btn" id="btn-sample-file">Drop Config File (PC → Mac)</button>
-            <button type="button" class="sim-pill-btn" id="btn-demo-wake">Demo Wake-on-Receive</button>
-            <button type="button" class="sim-pill-btn" data-action="clear">Reset Demo</button>
-          </div>
-          <p class="sim-hint">Tip: You can actually drag files from your desktop onto either window above, or focus an input and press Cmd+V / Ctrl+V with a screenshot.</p>
-        </div>
-      </div>
-    </section>
+          <!-- ===============================================================
+               QUICK-ACTION CONTROL BAR BELOW SIMULATOR
+               =============================================================== -->
+          <div class="mt-7 flex flex-col items-center gap-3">
+            <div class="inline-flex flex-wrap items-center justify-center gap-2 p-2 rounded-2xl bg-white/[0.025] border border-white/[0.07] backdrop-blur-xl">
+              <button type="button" id="btnDropScreenshot"
+                      class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12.5px] font-medium text-[#E2E8F0] bg-white/[0.045] hover:bg-white/[0.095] border border-white/[0.07] active:scale-[0.98] transition-all">
+                <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="text-sky-300" aria-hidden="true">
+                  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                  <circle cx="9" cy="9" r="2" />
+                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                </svg>
+                <span>Drop Screenshot (Mac → PC)</span>
+              </button>
 
-    <!-- Quiet Contrast Strip -->
-    <section class="section">
-      <div class="container">
-        <div class="section-eyebrow">Why Lan-Line</div>
-        <h2 class="section-title">Two computers shouldn’t feel like two planets.</h2>
-        <p class="section-lead">
-          Your Mac and Windows machine sit twelve inches apart. Moving a screenshot, config snippet, or asset shouldn’t require a cloud server, an account, or a workaround.
-        </p>
+              <button type="button" id="btnSendConfig"
+                      class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12.5px] font-medium text-[#E2E8F0] bg-white/[0.045] hover:bg-white/[0.095] border border-white/[0.07] active:scale-[0.98] transition-all">
+                <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="text-sky-300" aria-hidden="true">
+                  <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                  <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                </svg>
+                <span>Send Config (PC → Mac)</span>
+              </button>
 
-        <div class="contrast-grid">
-          <div class="contrast-card">
-            <div class="contrast-old">Slack / Discord self-DMs</div>
-            <h3>Zero accounts. Zero compression.</h3>
-            <p>Stop cluttering work chat with screenshots and keys. Files arrive full-resolution over your local network.</p>
-          </div>
-          <div class="contrast-card">
-            <div class="contrast-old">AirDrop / Universal Clipboard</div>
-            <h3>Built for Mac ↔ Windows</h3>
-            <p>No Apple-only walls and no silent clipboard overwrites. Keep a clean, visible drop stream across OSes.</p>
-          </div>
-          <div class="contrast-card">
-            <div class="contrast-old">Cloud Drives</div>
-            <h3>Instant, not synced</h3>
-            <p>No upload queues or leftover junk files clogging Drive or iCloud. Drop it, grab it, move on.</p>
-          </div>
-          <div class="contrast-card">
-            <div class="contrast-old">SMB Network Shares</div>
-            <h3>Text, images &amp; files in one spot</h3>
-            <p>Skip mounting network volumes just to pass a URL, SSH snippet, or 2 KB screenshot across the desk.</p>
-          </div>
-        </div>
-      </div>
-    </section>
+              <button type="button" id="btnWakeDemo"
+                      class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12.5px] font-medium text-emerald-200 bg-emerald-400/[0.08] hover:bg-emerald-400/[0.15] border border-emerald-400/[0.2] active:scale-[0.98] transition-all">
+                <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+                <span>Demo Wake-on-Receive</span>
+              </button>
 
-    <!-- Feature Bento Grid -->
-    <section class="section" id="features">
-      <div class="container">
-        <div class="section-eyebrow">Crafted for Daily Flow</div>
-        <h2 class="section-title">Small details that make it stick.</h2>
-        <p class="section-lead">Designed to stay quiet until the second you need it—and get out of your way immediately after.</p>
-
-        <div class="bento-grid">
-          <article class="bento-card">
-            <div class="bento-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color:#E0463A"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
-            </div>
-            <h3>Always Pinned</h3>
-            <p>Toggle the pushpin to float Lan-Line cleanly above your active apps—always one drag away, never buried under thirty tabs.</p>
-          </article>
-
-          <article class="bento-card">
-            <div class="bento-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-            </div>
-            <h3>Paste Screenshots Directly</h3>
-            <p>Hit Cmd+V or Ctrl+V with a raw image on your clipboard. Lan-Line auto-wraps it into a clean, timestamped PNG chip ready to drag out.</p>
-          </article>
-
-          <article class="bento-card">
-            <div class="bento-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </div>
-            <h3>One-Click Copy &amp; Delivery Checks</h3>
-            <p>Every text bubble and file chip ships with an inline copy button and instant delivery checkmark—no highlighting, no guessing.</p>
-          </article>
-
-          <article class="bento-card">
-            <div class="bento-icon">
-              <span class="dot-emerald" style="width:12px;height:12px;"></span>
-            </div>
-            <h3>Wakes on Receive</h3>
-            <p>Keep Lan-Line minimized while you work. The moment your other machine sends a file or link, the window pops up ready for you.</p>
-          </article>
-
-          <article class="bento-card">
-            <div class="bento-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            </div>
-            <h3>Direct Local LAN</h3>
-            <p>Machine to machine over your local network. Zero cloud relays, zero logins, no size cap beyond your free disk space.</p>
-          </article>
-
-          <article class="bento-card">
-            <div class="bento-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
-            </div>
-            <h3>Live Status at a Glance</h3>
-            <p>Emerald green means linked and ready; slate gray means standing by for your peer. Zero nested preference menus to babysit.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- 3-Step Workflow -->
-    <section class="section" id="how-it-works">
-      <div class="container">
-        <div class="section-eyebrow">30-Second Setup</div>
-        <h2 class="section-title">Open on both screens. Start dropping.</h2>
-
-        <div class="steps-grid">
-          <div class="step-card">
-            <span class="step-num">01 / CONNECT</span>
-            <h3>Launch on Mac &amp; Windows</h3>
-            <p>Open Lan-Line on both computers. One shows a short pairing code; pick it on the other and type the code. No accounts, no cloud sign-in.</p>
-          </div>
-          <div class="step-card">
-            <span class="step-num">02 / DROP</span>
-            <h3>Drag, paste, or type</h3>
-            <p>Throw in a file, paste a clipboard screenshot, or send a link or terminal snippet. Works identically in both directions.</p>
-          </div>
-          <div class="step-card">
-            <span class="step-num">03 / GRAB</span>
-            <h3>Copy or drag straight out</h3>
-            <p>The receiving window wakes up instantly. Click copy on text or drag the file chip straight into Finder, Explorer, or any open app.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Download Card -->
-    <section class="section" id="download">
-      <div class="container">
-        <div class="download-card">
-          <div>
-            <div class="section-eyebrow">Public beta · v0.9.0-beta.1</div>
-            <h2 class="section-title" style="margin-bottom:10px;">Get Lan-Line.</h2>
-            <p style="color:var(--text-secondary);font-size:15px;line-height:1.6;">
-              A normal installer for each computer. Install it on both, pair once with a short code, and start dropping.
-            </p>
-            <ul class="perks-list">
-              <li><span class="dot-emerald"></span> macOS 14 or later (Apple Silicon) · Windows 10/11 (64-bit)</li>
-              <li><span class="dot-emerald"></span> 100% local LAN transfers — no accounts, no telemetry</li>
-              <li><span class="dot-emerald"></span> Files, text snippets &amp; pasted PNGs — as big as your disk allows</li>
-            </ul>
-            <div class="download-btns">
-              <a class="btn-primary" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg" data-platform="mac">
-                Download for macOS
-              </a>
-              <a class="btn-glass" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe" data-platform="win">
-                Download for Windows
-              </a>
-            </div>
-            <p class="beta-note">
-              <span class="beta-tag">BETA</span>&nbsp; This is an early build and hasn’t been tested thoroughly yet, so expect rough edges.
-              The apps aren’t code-signed yet, so the first open asks for a one-time OK: on a Mac, System Settings → Privacy &amp; Security → Open Anyway; on Windows, More info → Run anyway.
-              Found a problem? <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer">Open an issue</a>.
-            </p>
-          </div>
-
-          <div class="cli-box">
-            <div class="cli-tabs" role="tablist">
-              <button type="button" class="cli-tab active" data-cli="brew">Homebrew (macOS)</button>
-            </div>
-            <div class="cli-code-row">
-              <code id="cli-command">brew install --cask averywrobinson/tap/lan-line</code>
-              <button type="button" class="copy-chip-btn" id="btn-copy-cli" title="Copy command" aria-label="Copy install command">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <button type="button" id="btnResetDemo"
+                      class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12.5px] font-medium text-[#94A3B8] hover:text-white hover:bg-white/[0.06] transition-all">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                <span>Reset Demo</span>
               </button>
             </div>
-            <ul class="req-list">
-              <li><b>macOS:</b> DMG, drag Lan-Line to Applications. Apple Silicon, macOS 14+.</li>
-              <li><b>Windows:</b> one-click setup, no admin needed, .NET included. Windows 10 (1809+) or 11, 64-bit.</li>
-              <li><b>Both:</b> on the same network. Allow Lan-Line through the firewall if asked.</li>
-            </ul>
-            <div class="cli-links">
-              <a href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">Source Code ↗</a>
-              <a href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">All Releases ↗</a>
-              <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer">Report Issue ↗</a>
+
+            <p class="text-[12px] text-[#64748B] text-center">
+              Tip: Drag any real file from your computer onto either window, or focus a window and hit <span class="font-mono text-[#94A3B8]">Cmd/Ctrl+V</span> with a copied image.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================
+         3. QUIET CONTRAST STRIP (3 MINIMAL GLASS TILES)
+         ================================================================= -->
+    <section class="relative z-10 py-8 px-4 sm:px-6 lg:px-8">
+      <div class="max-w-6xl mx-auto">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          <!-- Tile 1 -->
+          <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-2">
+            <div class="flex items-center gap-2.5 text-[#F8FAFC]">
+              <span class="w-7 h-7 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#CBD5E1]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  <line x1="9" y1="10" x2="15" y2="10" />
+                </svg>
+              </span>
+              <h2 class="text-[15px] font-semibold tracking-[-0.02em]">No Slack-ing yourself</h2>
+            </div>
+            <p class="text-[13.5px] leading-relaxed text-[#94A3B8]">
+              Keep work chat clean and avoid silent image compression when moving quick screenshots.
+            </p>
+          </div>
+
+          <!-- Tile 2 -->
+          <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-2">
+            <div class="flex items-center gap-2.5 text-[#F8FAFC]">
+              <span class="w-7 h-7 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#CBD5E1]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2" y="4" width="8" height="11" rx="1.5" />
+                  <rect x="14" y="9" width="8" height="11" rx="1.5" />
+                  <path d="M10 9.5h4" />
+                </svg>
+              </span>
+              <h2 class="text-[15px] font-semibold tracking-[-0.02em]">No AirDrop OS walls</h2>
+            </div>
+            <p class="text-[13.5px] leading-relaxed text-[#94A3B8]">
+              macOS to Windows and back without friction, discovery stalls, or ecosystem lock-in.
+            </p>
+          </div>
+
+          <!-- Tile 3 -->
+          <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-2">
+            <div class="flex items-center gap-2.5 text-[#F8FAFC]">
+              <span class="w-7 h-7 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#CBD5E1]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </span>
+              <h2 class="text-[15px] font-semibold tracking-[-0.02em]">No cloud queues</h2>
+            </div>
+            <p class="text-[13.5px] leading-relaxed text-[#94A3B8]">
+              Stays on your LAN. Zero accounts, zero uploads, and nothing left sitting on remote servers.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================
+         4. FEATURE BENTO GRID (6 SMOKED-GLASS CARDS WITH SPECULAR GLOW)
+         ================================================================= -->
+    <section id="features" class="relative z-10 py-20 sm:py-28 px-4 sm:px-6 lg:px-8 scroll-mt-16">
+      <div class="max-w-6xl mx-auto">
+
+        <div class="max-w-xl mb-12 sm:mb-14">
+          <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Crafted for dual-rig desks</p>
+          <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC] mb-4">
+            Every detail built to stay out of your way.
+          </h2>
+          <p class="text-[15.5px] leading-relaxed text-[#94A3B8]">
+            No bloated transfer dashboards or buried menus—just a calm glass window engineered for sub-second handoffs.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="bentoGrid">
+
+          <!-- Card 1 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="12" y1="17" x2="12" y2="22" />
+                  <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Always Pinned, Never Buried</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                One-click float-on-top keeps Lan-Line parked neatly in the corner of each display—always a single drag away.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span>Float toggle</span>
+              <span class="text-[#CBD5E1]">⌘P / Ctrl+P</span>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                  <path d="m9 14 2 2 4-4" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Paste Screenshots Straight In</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                Hit Cmd+V or Ctrl+V with an image on your clipboard. Lan-Line wraps it into a crisp, timestamped PNG chip ready to drag straight into any folder or app.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span class="text-sky-200/80">pasted-20261120.png</span>
+              <span>Lossless PNG</span>
+            </div>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Wakes Up on Arrival</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                Minimize Lan-Line while you focus. The moment your other machine sends a file or snippet, the window gently surfaces so it’s waiting for you.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span>Auto-surface</span>
+              <span class="text-emerald-300/90">● Ready on wake</span>
+            </div>
+          </div>
+
+          <!-- Card 4 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">One-Click Copy &amp; Receipts</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                Every text bubble and file chip carries an inline copy button and instant delivery checkmark—no highlighting text, no guessing whether it landed.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span>Delivery ACK</span>
+              <span class="text-[#CBD5E1]">✓ Verified</span>
+            </div>
+          </div>
+
+          <!-- Card 5 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Direct Local Peering</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                Transfers directly machine-to-machine over a local port like <span class="font-mono text-[#CBD5E1]">:47830</span>. Full gigabit LAN throughput, zero relay servers, and total privacy.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span>Peer socket</span>
+              <span class="text-sky-200/80">100% Local LAN</span>
+            </div>
+          </div>
+
+          <!-- Card 6 -->
+          <div class="bento-card smoked-glass rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6">
+            <div>
+              <div class="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] flex items-center justify-center text-[#E2E8F0] mb-5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="12" rx="2" />
+                  <line x1="8" y1="20" x2="16" y2="20" />
+                  <line x1="12" y1="16" x2="12" y2="20" />
+                </svg>
+              </div>
+              <h3 class="text-[16.5px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Built for Both Desks</h3>
+              <p class="text-[14px] leading-relaxed text-[#94A3B8]">
+                Respects each operating system’s visual language—authentic macOS vibrancy on your laptop, crisp Windows 11 Fluent glass on your workstation.
+              </p>
+            </div>
+            <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11.5px] font-mono text-[#64748B]">
+              <span>Native builds</span>
+              <span class="text-[#CBD5E1]">macOS + Win 11</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================
+         5. HOW IT WORKS (3 SLEEK NUMBERED HORIZONTAL STEPS)
+         ================================================================= -->
+    <section id="how-it-works" class="relative z-10 py-20 sm:py-24 px-4 sm:px-6 lg:px-8 scroll-mt-16">
+      <div class="max-w-6xl mx-auto">
+
+        <div class="text-center max-w-xl mx-auto mb-14 sm:mb-16">
+          <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Zero-config workflow</p>
+          <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC]">
+            Linked in seconds. Muscle memory in minutes.
+          </h2>
+        </div>
+
+        <div class="relative grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-6">
+          <!-- Subtle Connecting Hairline on Desktop -->
+          <div class="hidden md:block absolute top-6 left-[16%] right-[16%] h-px bg-gradient-to-r from-transparent via-white/[0.14] to-transparent pointer-events-none" aria-hidden="true"></div>
+
+          <!-- Step 01 -->
+          <div class="relative flex flex-col items-start md:items-center md:text-center px-2">
+            <div class="w-12 h-12 rounded-2xl smoked-glass-subtle flex items-center justify-center font-mono text-[13px] font-medium text-sky-200 mb-5 relative z-10">
+              01
+            </div>
+            <h3 class="text-[17px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Open on both machines</h3>
+            <p class="text-[14px] leading-relaxed text-[#94A3B8] max-w-xs">
+              Launch Lan-Line on your Mac and PC. They find each other on your local network—pair once with a short code, no IP hunting required.
+            </p>
+          </div>
+
+          <!-- Step 02 -->
+          <div class="relative flex flex-col items-start md:items-center md:text-center px-2">
+            <div class="w-12 h-12 rounded-2xl smoked-glass-subtle flex items-center justify-center font-mono text-[13px] font-medium text-sky-200 mb-5 relative z-10">
+              02
+            </div>
+            <h3 class="text-[17px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Drop, paste, or type</h3>
+            <p class="text-[14px] leading-relaxed text-[#94A3B8] max-w-xs">
+              Drag in files, paste clipboard screenshots, or send URLs and terminal snippets straight into the pinned window.
+            </p>
+          </div>
+
+          <!-- Step 03 -->
+          <div class="relative flex flex-col items-start md:items-center md:text-center px-2">
+            <div class="w-12 h-12 rounded-2xl smoked-glass-subtle flex items-center justify-center font-mono text-[13px] font-medium text-sky-200 mb-5 relative z-10">
+              03
+            </div>
+            <h3 class="text-[17px] font-semibold tracking-[-0.02em] text-[#F8FAFC] mb-2">Copy or drag out</h3>
+            <p class="text-[14px] leading-relaxed text-[#94A3B8] max-w-xs">
+              Grab it immediately on the other screen with one click or a drag straight into your editor or folder. Identical in both directions.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================
+         6. DOWNLOAD & PRICING SECTION
+         ================================================================= -->
+    <section id="download" class="relative z-10 py-20 sm:py-28 px-4 sm:px-6 lg:px-8 scroll-mt-16">
+      <div class="max-w-3xl mx-auto relative">
+
+        <!-- Restrained Glow behind Pricing Card -->
+        <div class="absolute -inset-8 bg-[radial-gradient(ellipse_at_center,rgba(100,155,225,0.14)_0%,transparent_70%)] blur-2xl pointer-events-none" aria-hidden="true"></div>
+
+        <div class="relative smoked-glass rounded-3xl p-8 sm:p-12 text-center overflow-hidden">
+          <!-- Subtle top highlight accent -->
+          <div class="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-px bg-gradient-to-r from-transparent via-sky-200/45 to-transparent" aria-hidden="true"></div>
+
+          <h2 class="text-3xl sm:text-[40px] font-semibold tracking-tighterDisplay text-[#F8FAFC] leading-tight mb-4">
+            Bridge your desk in 30 seconds.
+          </h2>
+
+          <!-- Version line -->
+          <div class="inline-flex flex-wrap items-baseline justify-center gap-2.5 mb-3">
+            <span class="text-3xl sm:text-4xl font-semibold tracking-[-0.03em] text-white">v0.9</span>
+            <span class="text-[#64748B]">·</span>
+            <span class="text-[15.5px] font-medium text-sky-200">Public beta, open source</span>
+          </div>
+
+          <p class="text-[13.5px] text-[#94A3B8] mb-8">
+            No account required &nbsp;·&nbsp; macOS 14+ (Apple Silicon) &amp; Windows 10/11
+          </p>
+
+          <!-- Download Buttons wired directly to GitHub Releases + interactive modal -->
+          <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-8">
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg"
+               onclick="openDownloadModal('macOS')"
+               class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-8px_rgba(248,250,252,0.2)] active:scale-[0.985] transition-all">
+              <!-- Minimal Apple icon -->
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.96 6.32c.68-.83 1.14-1.98 1.01-3.12-.98.04-2.16.65-2.86 1.48-.62.72-1.17 1.89-1.02 3.01 1.09.08 2.19-.55 2.87-1.37z" />
+              </svg>
+              <span>Download for macOS</span>
+            </a>
+
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe"
+               onclick="openDownloadModal('Windows')"
+               class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#F8FAFC] bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.13] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] active:scale-[0.985] transition-all">
+              <!-- Minimal Windows 4-pane grid icon -->
+              <svg width="14.5" height="14.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M2 3.5h9.2v8.2H2V3.5zm10.8 0H22v8.2h-9.2V3.5zM2 12.8h9.2V21H2v-8.2zm10.8 0H22V21h-9.2v-8.2z" />
+              </svg>
+              <span>Download for Windows</span>
+            </a>
+          </div>
+
+          <p class="text-[12.5px] leading-relaxed text-[#64748B] max-w-md mx-auto -mt-3 mb-8">
+            Beta: an early build that hasn’t been tested thoroughly yet. It isn’t code-signed yet, so the first open asks for a one-time OK (see the FAQ).
+          </p>
+
+          <!-- Terminal Install Pill Switcher + GitHub Source / Releases Strip -->
+          <div class="max-w-md mx-auto">
+            <div class="inline-flex items-center p-1 rounded-full bg-black/40 border border-white/[0.08] mb-3">
+              <button type="button" id="tabBrew" onclick="switchPkgManager('brew')"
+                      class="px-3.5 py-1 rounded-full text-[12px] font-medium bg-white/[0.12] text-white transition-all">
+                Homebrew
+              </button>
+            </div>
+
+            <div class="recessed-input rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5 overflow-x-auto no-scrollbar">
+                <span class="font-mono text-[12px] text-[#64748B] select-none">$</span>
+                <code id="cliCommandText" class="font-mono text-[12.5px] sm:text-[13px] text-[#E2E8F0] whitespace-nowrap">brew install averywrobinson/tap/lan-line</code>
+              </div>
+              <button type="button" id="copyCliBtn" onclick="copyCliCommand()"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11.5px] font-medium text-[#94A3B8] hover:text-white hover:bg-white/[0.08] transition-colors shrink-0">
+                <svg id="cliCopyIcon" width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+                <span id="cliCopyLabel">Copy</span>
+              </button>
+            </div>
+
+            <!-- Source / Releases GitHub Links -->
+            <div class="mt-4 pt-4 border-t border-white/[0.06] flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[12.5px]">
+              <a href="https://github.com/averywrobinson/lan-line"
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 class="inline-flex items-center gap-1.5 text-[#CBD5E1] hover:text-white transition-colors">
+                <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="currentColor" class="text-[#94A3B8]" aria-hidden="true">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+                </svg>
+                <span>Source</span>
+                <span class="font-mono text-[11px] text-[#64748B]">averywrobinson/lan-line</span>
+              </a>
+              <span class="text-white/15" aria-hidden="true">·</span>
+              <a href="https://github.com/averywrobinson/lan-line/releases"
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 class="text-sky-200/85 hover:text-sky-200 transition-colors">
+                Releases ↗
+              </a>
+              <span class="text-white/15" aria-hidden="true">·</span>
+              <a href="https://github.com/averywrobinson/lan-line/issues/new/choose"
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 class="text-[#94A3B8] hover:text-[#E2E8F0] transition-colors">
+                Issues
+              </a>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- FAQ -->
-    <section class="section" id="faq">
-      <div class="container">
-        <div class="section-eyebrow">Questions</div>
-        <h2 class="section-title">Straight answers.</h2>
+    <!-- =================================================================
+         7. FAQ ACCORDION (4 CRISP EXPANDABLE ITEMS)
+         ================================================================= -->
+    <section id="faq" class="relative z-10 py-16 sm:py-24 px-4 sm:px-6 lg:px-8 scroll-mt-16">
+      <div class="max-w-3xl mx-auto">
 
-        <div class="faq-list">
-          <div class="faq-item">
-            <button type="button" class="faq-q">
-              <span>Is Lan-Line finished?</span>
-              <span class="faq-plus">+</span>
+        <div class="text-center mb-12">
+          <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Questions</p>
+          <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC]">
+            Plain answers. No fine print.
+          </h2>
+        </div>
+
+        <div class="flex flex-col gap-3" id="faqList">
+
+          <!-- FAQ 1 -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="true">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="true">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Do my files ever touch the cloud?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>Not yet. v0.9.0-beta.1 is a public beta: it works day to day, but it hasn’t been tested thoroughly on many networks and machines. If something breaks, please <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer" style="color:var(--text-secondary);">open an issue</a> with your OS versions and what happened.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  Never. Every message, pasted screenshot, and file travels directly from one machine to the other over your local network (LAN). There are no cloud relays, no user accounts, and zero telemetry tracking your transfers.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div class="faq-item">
-            <button type="button" class="faq-q">
-              <span>Why does my computer warn me the first time I open it?</span>
-              <span class="faq-plus">+</span>
+          <!-- FAQ 2 -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Does it work between macOS and Windows?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>The beta isn’t code-signed yet. On a Mac, macOS says it can’t verify the app: click Done, then open System Settings → Privacy &amp; Security and click Open Anyway. On Windows, SmartScreen shows “Windows protected your PC”: choose More info → Run anyway. You only do this once.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  Yes—bridging Mac and Windows is the exact reason Lan-Line exists. It also pairs Mac-to-Mac and PC-to-PC the same way: one computer shows a short code, the other types it.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div class="faq-item open">
-            <button type="button" class="faq-q">
-              <span>Do my files or snippets ever touch the cloud?</span>
-              <span class="faq-plus">+</span>
+          <!-- FAQ 3 -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Why not use a KVM or shared clipboard?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>Never. Lan-Line connects Computer A and Computer B directly over your local network (LAN). Your files, screenshots, API keys, and links stay inside your room.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  Shared clipboards silently overwrite whatever you copied ten seconds ago and struggle with binary files or multi-file drops. Lan-Line gives you a visible, scrollable drop tray so every link, image, and file stays intact until you grab it.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div class="faq-item">
-            <button type="button" class="faq-q">
-              <span>Does it work between macOS and Windows?</span>
-              <span class="faq-plus">+</span>
+          <!-- FAQ 4 -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Is there a file size limit?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>Yes—Mac ↔ Windows is the reason Lan-Line exists. It also pairs two Macs or two Windows PCs: one computer shows a code, the other types it.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  No artificial caps. Because files stream directly across your local network rather than through a cloud server, a 25-byte config file and a 4 GB video export both move at whatever speed your router or Ethernet switch supports.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div class="faq-item">
-            <button type="button" class="faq-q">
-              <span>Why not just use a shared clipboard or KVM?</span>
-              <span class="faq-plus">+</span>
+
+          <!-- FAQ (beta) -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Is Lan-Line finished?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>Shared clipboards silently overwrite what you just copied and break on multi-file drops. Lan-Line gives you a visible, scrollable smoked-glass tray so nothing vanishes before you grab it.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  Not yet—v0.9 is a public beta and hasn’t been tested thoroughly across many networks and machines. If something breaks, please open an issue on GitHub with both OS versions and what happened.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div class="faq-item">
-            <button type="button" class="faq-q">
-              <span>What happens when I paste a screenshot from my clipboard?</span>
-              <span class="faq-plus">+</span>
+          <!-- FAQ (beta) -->
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Why does my computer warn me the first time I open it?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
             </button>
-            <div class="faq-a">
-              <p>Lan-Line automatically wraps raw clipboard image data into a clean, timestamped PNG file chip (e.g., <code>pasted-20261120-183018.png</code>) that you can drag straight into any folder or app on the receiving computer.</p>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  The beta isn’t code-signed yet. On a Mac, click Done, then open System Settings → Privacy &amp; Security and click Open Anyway. On Windows, SmartScreen says “Windows protected your PC”: choose More info → Run anyway. You only do this once.
+                </p>
+              </div>
             </div>
           </div>
+
         </div>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer>
-    <div class="container footer-inner">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <svg class="brand-mark" viewBox="0 0 38 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="1.5" y="3.5" width="12" height="13" rx="3.2" stroke="#94A3B8" stroke-width="1.8" />
-          <rect x="24.5" y="3.5" width="12" height="13" rx="3.2" stroke="#64748B" stroke-width="1.8" />
-          <line x1="14" y1="10" x2="24" y2="10" stroke="#94A3B8" stroke-width="1.8" stroke-linecap="round" />
-        </svg>
-        <span>Lan-Line · Drop here. Grab there. · <span style="font-family:var(--font-mono);font-size:12px;">v0.9.0-beta.1</span> · MIT</span>
+  <!-- ===================================================================
+       8. MINIMALIST FOOTER
+       =================================================================== -->
+  <footer class="relative z-10 border-t border-white/[0.06] py-12 px-4 sm:px-6 lg:px-8 mt-8">
+    <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
+      <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-5">
+        <a href="#top" class="flex items-center gap-2.5">
+          <svg width="28" height="15" viewBox="0 0 34 18" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-white" aria-hidden="true">
+            <rect x="1" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.6" />
+            <line x1="12.5" y1="9" x2="21.5" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <rect x="21.5" y="3" width="11.5" height="12" rx="3" stroke="currentColor" stroke-width="1.6" opacity="0.6" />
+          </svg>
+          <span class="font-semibold text-[15px] tracking-[-0.025em] text-[#F8FAFC]">Lan-Line</span>
+        </a>
+        <span class="hidden sm:inline text-white/15">|</span>
+        <span class="text-[13px] text-[#64748B]">Drop here. Grab there.</span>
       </div>
-      <div class="footer-links">
-        <a href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">Releases</a>
-        <a href="https://github.com/averywrobinson/lan-line/issues" target="_blank" rel="noopener noreferrer">Issues</a>
-        <a href="#top">Back to top ↑</a>
+
+      <div class="flex flex-wrap items-center justify-center gap-6 text-[13px] text-[#64748B]">
+        <a href="https://github.com/averywrobinson/lan-line"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="inline-flex items-center gap-1.5 text-[#94A3B8] hover:text-[#F8FAFC] transition-colors">
+          <svg width="13.5" height="13.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a href="https://github.com/averywrobinson/lan-line/releases"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="hover:text-[#CBD5E1] transition-colors">
+          Releases
+        </a>
+        <a href="https://github.com/averywrobinson/lan-line/issues"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="hover:text-[#CBD5E1] transition-colors">
+          Issues
+        </a>
+        <button type="button" onclick="showToast('100% local LAN transfers · No cloud storage or analytics')" class="hover:text-[#CBD5E1] transition-colors">Privacy</button>
+        <button type="button" onclick="showToast('Paired with a one-time code · LAN traffic isn’t encrypted in this beta')" class="hover:text-[#CBD5E1] transition-colors">Security</button>
+        <span class="text-[#475569]">v0.9 beta · MIT · © 2026 Lan-Line</span>
       </div>
     </div>
   </footer>
 
-  <!-- Download Modal -->
-  <div class="modal-backdrop" id="download-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 id="modal-title" style="font-size:18px;font-weight:600;">Download Lan-Line</h3>
-        <button type="button" class="modal-close" id="modal-close" aria-label="Close">×</button>
+  <!-- ===================================================================
+       DOWNLOAD MODAL (SMOKED GLASS — WIRED TO GITHUB RELEASES & SOURCE)
+       =================================================================== -->
+  <div id="downloadModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+    <div class="smoked-glass rounded-2xl w-full max-w-md p-6 sm:p-7 relative animate-bubble-in">
+      <button type="button" onclick="closeDownloadModal()" aria-label="Close download modal"
+              class="absolute top-4 right-4 w-8 h-8 rounded-lg flex items-center justify-center text-[#94A3B8] hover:text-white hover:bg-white/[0.08] transition-colors">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-emerald-400/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </div>
+        <div>
+          <h3 id="modalTitle" class="text-[16px] font-semibold text-[#F8FAFC]">Lan-Line for macOS</h3>
+          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.1 · macOS 14+ · Apple Silicon</p>
+        </div>
       </div>
-      <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.6;">
-        Install it on both computers, then pair them once with a short code.
-      </p>
-      <div class="platform-grid">
-        <a class="platform-card" id="pick-mac" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg">
-          <span class="pc-name">macOS</span>
-          <span class="pc-file">Lan-Line-0.9.0-beta.1-mac.dmg · 2.6 MB</span>
-        </a>
-        <a class="platform-card" id="pick-win" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe">
-          <span class="pc-name">Windows</span>
-          <span class="pc-file">Lan-Line-0.9.0-beta.1-windows-setup.exe · 43 MB</span>
-        </a>
+
+      <!-- Progress Bar -->
+      <div class="w-full h-1.5 rounded-full bg-white/[0.07] overflow-hidden mb-3">
+        <div id="modalProgress" class="h-full w-0 rounded-full bg-gradient-to-r from-sky-300 to-emerald-300 transition-all duration-700 ease-out"></div>
       </div>
-      <p class="beta-note" style="margin-top:0;">
-        <span class="beta-tag">BETA</span>&nbsp; Early build, not thoroughly tested yet. Not code-signed yet, so the first open asks for a one-time OK (Mac: System Settings → Privacy &amp; Security → Open Anyway; Windows: More info → Run anyway).
-      </p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
-        <a class="btn-glass" style="flex:1;" href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">All releases on GitHub</a>
-        <a class="btn-glass" href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">Source</a>
+
+      <div class="flex items-center justify-between text-[11.5px] font-mono text-[#64748B] mb-5">
+        <span id="modalStatus">Starting your download…</span>
+        <span id="modalPercent" class="text-[#CBD5E1]">0%</span>
+      </div>
+
+      <!-- Release Endpoint & Source Verification Box -->
+      <div class="recessed-input rounded-xl p-3 mb-5">
+        <div class="flex items-center justify-between mb-1">
+          <span class="font-mono text-[10px] uppercase tracking-wider text-[#64748B]">Download URL</span>
+          <button type="button" id="copyReleaseUrlBtn" onclick="copyModalReleaseUrl()" class="font-mono text-[10.5px] text-sky-300 hover:text-sky-200">Copy URL</button>
+        </div>
+        <p id="modalReleaseUrl" class="font-mono text-[11px] text-[#CBD5E1] break-all leading-relaxed">
+          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg
+        </p>
+        <p class="text-[11.5px] text-[#64748B] mt-1.5">
+          <span id="modalFirstOpen">Beta builds aren’t code-signed yet; the first open asks for a one-time OK.</span>
+        </p>
+      </div>
+
+      <!-- Direct Action Links to GitHub Releases & Source Code -->
+      <div class="flex flex-col gap-2.5">
+        <a href="https://github.com/averywrobinson/lan-line/releases"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[13.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white transition-all">
+          <svg width="14.5" height="14.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span>All releases on GitHub ↗</span>
+        </a>
+
+        <div class="flex items-center gap-2.5">
+          <a href="https://github.com/averywrobinson/lan-line"
+             target="_blank"
+             rel="noopener noreferrer"
+             class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[13px] font-medium bg-white/[0.06] hover:bg-white/[0.12] text-[#E2E8F0] border border-white/[0.1] transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+            </svg>
+            <span>Inspect Source Code</span>
+          </a>
+
+          <button type="button" onclick="closeDownloadModal()"
+                  class="px-4 py-2 rounded-xl text-[13px] font-medium bg-white/[0.04] hover:bg-white/[0.1] text-[#94A3B8] hover:text-white border border-white/[0.08] transition-colors">
+            Close
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <!-- ===================================================================
+       FLOATING GLASS TOAST NOTIFICATION
+       =================================================================== -->
+  <div id="toast"
+       class="pointer-events-none fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] opacity-0 translate-y-3 transition-all duration-250">
+    <div class="smoked-glass rounded-full px-4 py-2 flex items-center gap-2.5 shadow-[0_12px_36px_rgba(0,0,0,0.7)]">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+      <span id="toastMessage" class="text-[12.5px] font-medium text-[#E2E8F0] whitespace-nowrap">Copied to clipboard</span>
+    </div>
+  </div>
 
+  <!-- ===================================================================
+       INTERACTIVE APPLICATION LOGIC
+       =================================================================== -->
   <script>
     (function () {
-      const feedMac = document.getElementById('feed-mac');
-      const feedPc = document.getElementById('feed-pc');
-      const winMac = document.getElementById('win-mac');
-      const winPc = document.getElementById('win-pc');
-      const pulseEl = document.getElementById('filament-pulse');
-      const latencyEl = document.getElementById('latency-badge');
-      const toastEl = document.getElementById('toast');
+      'use strict';
 
-      const initialItems = [
-        { from: 'mac', type: 'text', text: 'Updated deck & icons' },
-        { from: 'mac', type: 'file', name: 'hero-export.png', size: '2.4 MB', kind: 'image' },
+      /* -----------------------------------------------------------------
+         STATE & INITIAL DATA
+         ----------------------------------------------------------------- */
+      const GITHUB_REPO_URL = 'https://github.com/averywrobinson/lan-line';
+      const GITHUB_RELEASES_LATEST_URL = 'https://github.com/averywrobinson/lan-line/releases';
+
+      const INITIAL_MESSAGES = [
+        {
+          id: 'init-1',
+          sender: 'mac',
+          type: 'text',
+          content: 'Updated deck & icons',
+        },
+        {
+          id: 'init-2',
+          sender: 'mac',
+          type: 'file',
+          filename: 'hero-export.png',
+          size: '2.4 MB',
+          fileKind: 'image',
+        },
       ];
 
-      let items = [];
+      let messages = [];
+      let isMinimized = { mac: false, pc: false };
+      let isWakeDemoRunning = false;
+      let activePkgManager = 'brew';
       let toastTimer = null;
+      let latencyTimer = null;
+      let wakeBadgeTimers = { mac: null, pc: null };
 
-      function showToast(msg) {
-        toastEl.textContent = msg;
-        toastEl.classList.add('show');
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+      /* -----------------------------------------------------------------
+         DOM ELEMENTS
+         ----------------------------------------------------------------- */
+      const macWindow = document.getElementById('macWindow');
+      const pcWindow = document.getElementById('pcWindow');
+      const macMinimizedPill = document.getElementById('macMinimizedPill');
+      const pcMinimizedPill = document.getElementById('pcMinimizedPill');
+      const macFeed = document.getElementById('macFeed');
+      const pcFeed = document.getElementById('pcFeed');
+      const macForm = document.getElementById('macForm');
+      const pcForm = document.getElementById('pcForm');
+      const macInput = document.getElementById('macInput');
+      const pcInput = document.getElementById('pcInput');
+      const macFileInput = document.getElementById('macFileInput');
+      const pcFileInput = document.getElementById('pcFileInput');
+      const macDropOverlay = document.getElementById('macDropOverlay');
+      const pcDropOverlay = document.getElementById('pcDropOverlay');
+      const macPinBtn = document.getElementById('macPinBtn');
+      const pcPinBtn = document.getElementById('pcPinBtn');
+      const macWakeBadge = document.getElementById('macWakeBadge');
+      const pcWakeBadge = document.getElementById('pcWakeBadge');
+
+      const pulseHLR = document.getElementById('pulseHLR');
+      const pulseHRL = document.getElementById('pulseHRL');
+      const pulseVTB = document.getElementById('pulseVTB');
+      const pulseVBT = document.getElementById('pulseVBT');
+      const filamentNodeH = document.getElementById('filamentNodeH');
+      const filamentNodeV = document.getElementById('filamentNodeV');
+      const latencyBadgeH = document.getElementById('latencyBadgeH');
+      const latencyBadgeV = document.getElementById('latencyBadgeV');
+
+      /* -----------------------------------------------------------------
+         UTILITIES: SAFE CLIPBOARD, ESCAPING, BYTE & TIMESTAMP FORMATTING
+         ----------------------------------------------------------------- */
+      function copyTextReliable(text) {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.setAttribute('readonly', '');
+          textarea.style.position = 'fixed';
+          textarea.style.top = '-9999px';
+          textarea.style.left = '-9999px';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          textarea.setSelectionRange(0, textarea.value.length);
+          const success = document.execCommand('copy');
+          document.body.removeChild(textarea);
+          return success;
+        } catch (err) {
+          return false;
+        }
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
 
       function formatBytes(bytes) {
-        if (bytes < 1024) return bytes + ' bytes';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1).replace(/\.0$/, '') + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 bytes';
+        if (bytes < 1024) return `${bytes} bytes`;
+        const kb = bytes / 1024;
+        if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+        const mb = kb / 1024;
+        if (mb < 1024) return `${mb.toFixed(1)} MB`;
+        const gb = mb / 1024;
+        return `${gb.toFixed(2)} GB`;
       }
 
-      function timestampName() {
-        const d = new Date();
+      function generateTimestampedPngName() {
+        const now = new Date();
         const pad = (n) => String(n).padStart(2, '0');
-        return `pasted-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
+        const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+        const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        return `pasted-${datePart}-${timePart}.png`;
       }
 
-      function copyIconSvg() {
-        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      function inferFileKind(filename) {
+        const lower = (filename || '').toLowerCase();
+        if (/\.(png|jpg|jpeg|webp|gif|heic|svg|avif)$/.test(lower)) return 'image';
+        if (/\.(toml|json|yaml|yml|env|txt|md|js|ts|py|sh|rs|go|css|html)$/.test(lower)) return 'code';
+        return 'file';
       }
 
-      function fileIconSvg(kind) {
-        if (kind === 'image') {
-          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+      window.showToast = function (msg) {
+        const toast = document.getElementById('toast');
+        const toastMsg = document.getElementById('toastMessage');
+        toastMsg.textContent = msg;
+        toast.classList.remove('opacity-0', 'translate-y-3');
+        toast.classList.add('opacity-100', 'translate-y-0');
+
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.classList.remove('opacity-100', 'translate-y-0');
+          toast.classList.add('opacity-0', 'translate-y-3');
+        }, 2200);
+      };
+
+      window.focusInput = function (side) {
+        if (isMinimized[side]) restoreWindow(side, false);
+        const input = side === 'mac' ? macInput : pcInput;
+        input.focus();
+      };
+
+      /* -----------------------------------------------------------------
+         BUBBLE RENDERING ENGINE
+         ----------------------------------------------------------------- */
+      function getFileIconSvg(fileKind) {
+        if (fileKind === 'image') {
+          return `
+            <div class="w-9 h-9 rounded-lg bg-white/[0.1] border border-white/[0.12] flex items-center justify-center text-[#E2E8F0] shrink-0">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                <circle cx="9" cy="9" r="2" />
+                <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+              </svg>
+            </div>
+          `;
         }
-        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+        return `
+          <div class="w-9 h-9 rounded-lg bg-white/[0.1] border border-white/[0.12] flex items-center justify-center text-[#E2E8F0] shrink-0">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+              <line x1="8" y1="13" x2="16" y2="13" />
+              <line x1="8" y1="17" x2="13" y2="17" />
+            </svg>
+          </div>
+        `;
       }
 
-      function createBubble(item, perspective) {
-        const isOut = item.from === perspective;
-        const el = document.createElement('div');
-        el.className = 'bubble ' + (isOut ? 'out' : 'in');
+      function createBubbleElement(msg, perspective, animate) {
+        const isOutgoing = msg.sender === perspective;
+        const wrapper = document.createElement('div');
+        wrapper.className = `flex w-full ${isOutgoing ? 'justify-end' : 'justify-start'} ${animate ? 'animate-bubble-in' : ''}`;
 
-        const copyValue = item.type === 'file' ? item.name : item.text;
+        const copyValue = msg.type === 'file' ? msg.filename : msg.content;
+        const bubbleClass = isOutgoing ? 'bubble-outgoing' : 'bubble-incoming';
+        const cornerClass = perspective === 'mac' ? 'rounded-[13px]' : 'rounded-[10px]';
 
-        if (item.type === 'file') {
-          el.innerHTML = `
-            <div class="bubble-row">
-              <div class="file-icon-box">${fileIconSvg(item.kind)}</div>
-              <div class="file-meta">
-                <span class="file-name"></span>
-                <span class="file-size"></span>
-              </div>
-              <div class="bubble-actions">
-                <button type="button" class="copy-chip-btn" title="Copy filename">${copyIconSvg()}</button>
-                ${isOut ? '<span class="check-mark" title="Delivered">✓</span>' : ''}
+        const card = document.createElement('div');
+        card.className = `group relative max-w-[88%] ${bubbleClass} ${cornerClass} px-3.5 py-2.5 transition-all ${!isOutgoing && msg.type === 'file' ? 'cursor-grab active:cursor-grabbing hover:border-sky-300/35' : ''}`;
+
+        // Allow native drag affordance on incoming file chips
+        if (!isOutgoing && msg.type === 'file') {
+          card.setAttribute('draggable', 'true');
+          card.setAttribute('title', `Drag ${msg.filename} into your files or click copy`);
+          card.addEventListener('dragstart', (e) => {
+            try {
+              e.dataTransfer.setData('text/plain', msg.filename);
+            } catch (_) {}
+            showToast(`Dragging ${msg.filename}…`);
+          });
+        }
+
+        const copyButtonHtml = `
+          <button type="button"
+                  data-copy-value="${escapeHtml(copyValue)}"
+                  title="Copy to clipboard"
+                  class="copy-bubble-btn inline-flex items-center gap-1 p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/[0.1] transition-all shrink-0">
+            <svg class="icon-copy" width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+            </svg>
+            <svg class="icon-check hidden text-emerald-400" width="13.5" height="13.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span class="copied-label hidden font-mono text-[10px] text-emerald-300 pr-0.5">Copied</span>
+          </button>
+        `;
+
+        const deliveryCheckHtml = isOutgoing
+          ? `<span class="text-[#94A3B8]/90 flex items-center" title="Delivered over LAN">
+               <svg width="12.5" height="12.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                 <polyline points="20 6 9 17 4 12" />
+               </svg>
+             </span>`
+          : '';
+
+        if (msg.type === 'text') {
+          card.innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-[13px] leading-[1.45] text-[#F1F5F9] break-words">${escapeHtml(msg.content)}</p>
+              <div class="flex items-center gap-1 shrink-0">
+                ${copyButtonHtml}
+                ${deliveryCheckHtml}
               </div>
             </div>
           `;
-          el.querySelector('.file-name').textContent = item.name;
-          el.querySelector('.file-size').textContent = item.size;
         } else {
-          el.innerHTML = `
-            <div class="bubble-row">
-              <span class="msg-text" style="word-break:break-word;"></span>
-              <div class="bubble-actions">
-                <button type="button" class="copy-chip-btn" title="Copy text">${copyIconSvg()}</button>
-                ${isOut ? '<span class="check-mark" title="Delivered">✓</span>' : ''}
+          card.innerHTML = `
+            <div class="flex items-center gap-3">
+              ${getFileIconSvg(msg.fileKind)}
+              <div class="min-w-0 flex-1 pr-1">
+                <p class="text-[13px] font-medium text-[#F8FAFC] truncate">${escapeHtml(msg.filename)}</p>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="font-mono text-[11px] text-[#94A3B8]">${escapeHtml(msg.size)}</span>
+                  ${!isOutgoing ? '<span class="hidden sm:inline font-mono text-[9.5px] text-sky-200/65">· Drag or copy</span>' : ''}
+                </div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                ${copyButtonHtml}
+                ${deliveryCheckHtml}
               </div>
             </div>
           `;
-          el.querySelector('.msg-text').textContent = item.text;
         }
 
-        const copyBtn = el.querySelector('.copy-chip-btn');
-        copyBtn.addEventListener('click', () => {
-          navigator.clipboard?.writeText(copyValue).catch(() => {});
-          copyBtn.classList.add('copied');
-          showToast('Copied: ' + (copyValue.length > 36 ? copyValue.slice(0, 36) + '…' : copyValue));
-          setTimeout(() => copyBtn.classList.remove('copied'), 1200);
+        wrapper.appendChild(card);
+        return wrapper;
+      }
+
+      function renderAllFeeds() {
+        macFeed.innerHTML = '';
+        pcFeed.innerHTML = '';
+        messages.forEach((msg) => {
+          macFeed.appendChild(createBubbleElement(msg, 'mac', false));
+          pcFeed.appendChild(createBubbleElement(msg, 'pc', false));
+        });
+        scrollFeedsToBottom();
+      }
+
+      function scrollFeedsToBottom() {
+        macFeed.scrollTop = macFeed.scrollHeight;
+        pcFeed.scrollTop = pcFeed.scrollHeight;
+      }
+
+      /* -----------------------------------------------------------------
+         LUMINOUS BRIDGE PULSE ANIMATION
+         ----------------------------------------------------------------- */
+      function triggerBridgePulse(fromSide) {
+        const latencyMs = (0.4 + Math.random() * 0.6).toFixed(1);
+        const label = `${latencyMs} ms · LAN`;
+
+        // Reset animation classes to allow immediate re-trigger
+        [pulseHLR, pulseHRL, pulseVTB, pulseVBT].forEach((el) => {
+          el.classList.remove('pulse-h-lr', 'pulse-h-rl', 'pulse-v-tb', 'pulse-v-bt');
+          void el.offsetWidth;
         });
 
-        return el;
-      }
-
-      function renderAll() {
-        feedMac.innerHTML = '';
-        feedPc.innerHTML = '';
-        items.forEach((item) => {
-          feedMac.appendChild(createBubble(item, 'mac'));
-          feedPc.appendChild(createBubble(item, 'pc'));
-        });
-        feedMac.scrollTop = feedMac.scrollHeight;
-        feedPc.scrollTop = feedPc.scrollHeight;
-      }
-
-      function triggerPulse(direction) {
-        pulseEl.classList.remove('pulse-right', 'pulse-left');
-        void pulseEl.offsetWidth;
-        pulseEl.classList.add(direction === 'mac' ? 'pulse-right' : 'pulse-left');
-        latencyEl.textContent = direction === 'mac' ? 'Mac → PC · LAN' : 'PC → Mac · LAN';
-      }
-
-      function wakeWindow(side) {
-        const win = side === 'mac' ? winMac : winPc;
-        if (win.classList.contains('minimized-state')) {
-          win.classList.remove('minimized-state');
-          win.classList.remove('waking');
-          void win.offsetWidth;
-          win.classList.add('waking');
-          showToast(`${side === 'pc' ? 'Windows PC' : 'macOS'} window woke up on receive`);
+        if (fromSide === 'mac') {
+          pulseHLR.classList.add('pulse-h-lr');
+          pulseVTB.classList.add('pulse-v-tb');
+        } else {
+          pulseHRL.classList.add('pulse-h-rl');
+          pulseVBT.classList.add('pulse-v-bt');
         }
-      }
 
-      function sendItem(item) {
-        items.push(item);
-        triggerPulse(item.from);
-        const receiver = item.from === 'mac' ? 'pc' : 'mac';
+        filamentNodeH.classList.add('active');
+        filamentNodeV.classList.add('active');
         setTimeout(() => {
-          wakeWindow(receiver);
-          renderAll();
-        }, 120);
+          filamentNodeH.classList.remove('active');
+          filamentNodeV.classList.remove('active');
+        }, 250);
+
+        // Flash monospace micro-badge
+        latencyBadgeH.textContent = label;
+        latencyBadgeV.textContent = label;
+        latencyBadgeH.classList.remove('opacity-0', 'translate-y-1');
+        latencyBadgeH.classList.add('opacity-100', 'translate-y-0');
+        latencyBadgeV.classList.remove('opacity-0', '-translate-x-1');
+        latencyBadgeV.classList.add('opacity-100', 'translate-x-0');
+
+        clearTimeout(latencyTimer);
+        latencyTimer = setTimeout(() => {
+          latencyBadgeH.classList.remove('opacity-100', 'translate-y-0');
+          latencyBadgeH.classList.add('opacity-0', 'translate-y-1');
+          latencyBadgeV.classList.remove('opacity-100', 'translate-x-0');
+          latencyBadgeV.classList.add('opacity-0', '-translate-x-1');
+        }, 1250);
       }
 
-      // Forms
-      document.querySelectorAll('[data-form]').forEach((form) => {
-        form.addEventListener('submit', (e) => {
-          e.preventDefault();
-          const side = form.getAttribute('data-form');
-          const input = form.querySelector('.win-input');
-          const val = input.value.trim();
-          if (!val) return;
-          sendItem({ from: side, type: 'text', text: val });
-          input.value = '';
-        });
+      /* -----------------------------------------------------------------
+         MINIMIZE & WAKE-ON-RECEIVE LOGIC
+         ----------------------------------------------------------------- */
+      function minimizeWindow(side) {
+        isMinimized[side] = true;
+        const winEl = side === 'mac' ? macWindow : pcWindow;
+        const pillEl = side === 'mac' ? macMinimizedPill : pcMinimizedPill;
+        winEl.classList.add('hidden');
+        pillEl.classList.remove('hidden');
+      }
+
+      function restoreWindow(side, wokeOnArrival) {
+        isMinimized[side] = false;
+        const winEl = side === 'mac' ? macWindow : pcWindow;
+        const pillEl = side === 'mac' ? macMinimizedPill : pcMinimizedPill;
+        const wakeBadge = side === 'mac' ? macWakeBadge : pcWakeBadge;
+
+        pillEl.classList.add('hidden');
+        winEl.classList.remove('hidden', 'animate-wake-spring');
+        void winEl.offsetWidth;
+
+        if (wokeOnArrival) {
+          winEl.classList.add('animate-wake-spring');
+          wakeBadge.classList.remove('hidden');
+          clearTimeout(wakeBadgeTimers[side]);
+          wakeBadgeTimers[side] = setTimeout(() => {
+            wakeBadge.classList.add('hidden');
+          }, 2800);
+        }
+      }
+
+      /* -----------------------------------------------------------------
+         CORE TRANSFER PIPELINE (BOTH DIRECTIONS)
+         ----------------------------------------------------------------- */
+      function sendTransfer(fromSide, payload) {
+        const toSide = fromSide === 'mac' ? 'pc' : 'mac';
+        const msg = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sender: fromSide,
+          ...payload,
+        };
+        messages.push(msg);
+
+        // 1. Immediately append on sender window
+        const senderFeed = fromSide === 'mac' ? macFeed : pcFeed;
+        senderFeed.appendChild(createBubbleElement(msg, fromSide, true));
+        senderFeed.scrollTop = senderFeed.scrollHeight;
+
+        // 2. Fire luminous filament pulse across bridge
+        triggerBridgePulse(fromSide);
+
+        // 3. Deliver to receiver window (~160ms later to feel synchronized with pulse)
+        setTimeout(() => {
+          const receiverFeed = toSide === 'mac' ? macFeed : pcFeed;
+          if (isMinimized[toSide]) {
+            restoreWindow(toSide, true);
+          }
+          receiverFeed.appendChild(createBubbleElement(msg, toSide, true));
+          receiverFeed.scrollTop = receiverFeed.scrollHeight;
+        }, 160);
+      }
+
+      /* -----------------------------------------------------------------
+         INLINE COPY HANDLER (EVENT DELEGATION)
+         ----------------------------------------------------------------- */
+      function handleFeedClick(e) {
+        const btn = e.target.closest('.copy-bubble-btn');
+        if (!btn) return;
+
+        const val = btn.getAttribute('data-copy-value') || '';
+        copyTextReliable(val);
+
+        const iconCopy = btn.querySelector('.icon-copy');
+        const iconCheck = btn.querySelector('.icon-check');
+        const label = btn.querySelector('.copied-label');
+
+        if (iconCopy && iconCheck && label) {
+          iconCopy.classList.add('hidden');
+          iconCheck.classList.remove('hidden');
+          label.classList.remove('hidden');
+          btn.classList.add('bg-emerald-400/10');
+
+          clearTimeout(btn._resetTimer);
+          btn._resetTimer = setTimeout(() => {
+            iconCopy.classList.remove('hidden');
+            iconCheck.classList.add('hidden');
+            label.classList.add('hidden');
+            btn.classList.remove('bg-emerald-400/10');
+          }, 1500);
+        }
+
+        showToast(`Copied "${val.length > 32 ? val.slice(0, 32) + '…' : val}"`);
+      }
+
+      macFeed.addEventListener('click', handleFeedClick);
+      pcFeed.addEventListener('click', handleFeedClick);
+
+      /* -----------------------------------------------------------------
+         FORM SUBMITS, FILE INPUTS, DRAG & DROP, AND CLIPBOARD PASTE
+         ----------------------------------------------------------------- */
+      macForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = macInput.value.trim();
+        if (!text) return;
+        macInput.value = '';
+        sendTransfer('mac', { type: 'text', content: text });
       });
 
-      // Clipboard image paste support inside inputs
-      document.querySelectorAll('.win-input').forEach((input) => {
-        input.addEventListener('paste', (e) => {
-          const clipItems = e.clipboardData?.items;
-          if (!clipItems) return;
-          for (const ci of clipItems) {
-            if (ci.type.startsWith('image/')) {
-              e.preventDefault();
-              const file = ci.getAsFile();
-              const side = input.id.endsWith('mac') ? 'mac' : 'pc';
-              sendItem({
-                from: side,
-                type: 'file',
-                name: timestampName(),
-                size: formatBytes(file ? file.size : 48200),
-                kind: 'image',
-              });
-              showToast('Clipboard image wrapped as draggable PNG');
-              return;
+      pcForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = pcInput.value.trim();
+        if (!text) return;
+        pcInput.value = '';
+        sendTransfer('pc', { type: 'text', content: text });
+      });
+
+      function handleFileList(side, fileList) {
+        if (!fileList || fileList.length === 0) return;
+        Array.from(fileList).forEach((file, idx) => {
+          setTimeout(() => {
+            sendTransfer(side, {
+              type: 'file',
+              filename: file.name || 'dropped-file.bin',
+              size: formatBytes(file.size),
+              fileKind: inferFileKind(file.name),
+            });
+          }, idx * 140);
+        });
+      }
+
+      macFileInput.addEventListener('change', (e) => {
+        handleFileList('mac', e.target.files);
+        e.target.value = '';
+      });
+
+      pcFileInput.addEventListener('change', (e) => {
+        handleFileList('pc', e.target.files);
+        e.target.value = '';
+      });
+
+      // Drag & Drop Wiring for both windows
+      function setupDropZone(windowEl, overlayEl, side) {
+        let dragCounter = 0;
+
+        windowEl.addEventListener('dragenter', (e) => {
+          e.preventDefault();
+          dragCounter++;
+          overlayEl.classList.remove('hidden');
+          overlayEl.classList.add('flex');
+        });
+
+        windowEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        });
+
+        windowEl.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          dragCounter = Math.max(0, dragCounter - 1);
+          if (dragCounter === 0) {
+            overlayEl.classList.add('hidden');
+            overlayEl.classList.remove('flex');
+          }
+        });
+
+        windowEl.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dragCounter = 0;
+          overlayEl.classList.add('hidden');
+          overlayEl.classList.remove('flex');
+
+          const files = e.dataTransfer && e.dataTransfer.files;
+          if (files && files.length > 0) {
+            handleFileList(side, files);
+          } else {
+            const droppedText = e.dataTransfer && e.dataTransfer.getData('text/plain');
+            if (droppedText && droppedText.trim()) {
+              sendTransfer(side, { type: 'text', content: droppedText.trim() });
             }
           }
         });
+      }
+
+      setupDropZone(macWindow, macDropOverlay, 'mac');
+      setupDropZone(pcWindow, pcDropOverlay, 'pc');
+
+      // Clipboard Paste Wiring (Auto-wraps pasted images into timestamped PNG chips)
+      function setupPasteHandler(windowEl, side) {
+        windowEl.addEventListener('paste', (e) => {
+          const items = e.clipboardData && e.clipboardData.items;
+          if (!items) return;
+
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.type && item.type.startsWith('image/')) {
+              e.preventDefault();
+              const blob = item.getAsFile();
+              const sizeStr = blob && blob.size ? formatBytes(blob.size) : '184 KB';
+              const pngName = generateTimestampedPngName();
+              sendTransfer(side, {
+                type: 'file',
+                filename: pngName,
+                size: sizeStr,
+                fileKind: 'image',
+              });
+              showToast(`Wrapped clipboard image as ${pngName}`);
+              return;
+            }
+          }
+
+          // If pasting raw text while focused directly on the window frame (not inside the input)
+          if (document.activeElement === windowEl) {
+            const pastedText = e.clipboardData.getData('text/plain');
+            if (pastedText && pastedText.trim()) {
+              e.preventDefault();
+              sendTransfer(side, { type: 'text', content: pastedText.trim() });
+            }
+          }
+        });
+      }
+
+      setupPasteHandler(macWindow, 'mac');
+      setupPasteHandler(pcWindow, 'pc');
+
+      /* -----------------------------------------------------------------
+         WINDOW CONTROLS: PIN, MINIMIZE, RESTORE
+         ----------------------------------------------------------------- */
+      function togglePin(btn, label) {
+        const pinned = btn.getAttribute('data-pinned') === 'true';
+        const next = !pinned;
+        btn.setAttribute('data-pinned', String(next));
+        btn.classList.toggle('pin-active', next);
+        showToast(`${label} ${next ? 'pinned on top' : 'unpinned'}`);
+      }
+
+      macPinBtn.addEventListener('click', () => togglePin(macPinBtn, 'Mac window'));
+      pcPinBtn.addEventListener('click', () => togglePin(pcPinBtn, 'PC window'));
+
+      document.getElementById('macMinBtn').addEventListener('click', () => minimizeWindow('mac'));
+      document.getElementById('pcMinBtn').addEventListener('click', () => minimizeWindow('pc'));
+      document.getElementById('macRestoreBtn').addEventListener('click', () => restoreWindow('mac', false));
+      document.getElementById('pcRestoreBtn').addEventListener('click', () => restoreWindow('pc', false));
+
+      /* -----------------------------------------------------------------
+         QUICK-ACTION DEMO CONTROLS
+         ----------------------------------------------------------------- */
+      document.getElementById('focusBridgeBtn').addEventListener('click', () => {
+        document.getElementById('live-demo').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          focusInput('mac');
+        }, 420);
       });
 
-      // Drag and drop files on either window
-      [winMac, winPc].forEach((win) => {
-        const side = win.getAttribute('data-side');
-        ['dragenter', 'dragover'].forEach((ev) => {
-          win.addEventListener(ev, (e) => {
-            e.preventDefault();
-            win.classList.add('drag-over');
+      document.getElementById('btnDropScreenshot').addEventListener('click', () => {
+        if (isMinimized.mac) restoreWindow('mac', false);
+        const pngName = generateTimestampedPngName();
+        const kb = Math.floor(140 + Math.random() * 320);
+        sendTransfer('mac', {
+          type: 'file',
+          filename: pngName,
+          size: `${kb} KB`,
+          fileKind: 'image',
+        });
+      });
+
+      document.getElementById('btnSendConfig').addEventListener('click', () => {
+        if (isMinimized.pc) restoreWindow('pc', false);
+        sendTransfer('pc', {
+          type: 'file',
+          filename: 'ferry-config.toml',
+          size: '1.2 KB',
+          fileKind: 'code',
+        });
+      });
+
+      document.getElementById('btnWakeDemo').addEventListener('click', () => {
+        if (isWakeDemoRunning) return;
+        isWakeDemoRunning = true;
+
+        if (isMinimized.mac) restoreWindow('mac', false);
+        minimizeWindow('pc');
+        showToast('Studio PC minimized — sending incoming drop…');
+
+        setTimeout(() => {
+          sendTransfer('mac', {
+            type: 'file',
+            filename: 'viewport-capture.png',
+            size: '842 KB',
+            fileKind: 'image',
           });
+          setTimeout(() => {
+            isWakeDemoRunning = false;
+          }, 500);
+        }, 450);
+      });
+
+      document.getElementById('btnResetDemo').addEventListener('click', () => {
+        isWakeDemoRunning = false;
+        restoreWindow('mac', false);
+        restoreWindow('pc', false);
+        macWakeBadge.classList.add('hidden');
+        pcWakeBadge.classList.add('hidden');
+        macPinBtn.setAttribute('data-pinned', 'true');
+        macPinBtn.classList.add('pin-active');
+        pcPinBtn.setAttribute('data-pinned', 'true');
+        pcPinBtn.classList.add('pin-active');
+        messages = INITIAL_MESSAGES.map((m) => ({ ...m }));
+        renderAllFeeds();
+        showToast('Live bridge reset');
+      });
+
+      /* -----------------------------------------------------------------
+         BENTO CARDS: MOUSE-FOLLOWING SPECULAR BORDER GLOW
+         ----------------------------------------------------------------- */
+      const bentoCards = document.querySelectorAll('.bento-card');
+      bentoCards.forEach((card) => {
+        card.addEventListener('mousemove', (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          card.style.setProperty('--mouse-x', `${x}px`);
+          card.style.setProperty('--mouse-y', `${y}px`);
         });
-        ['dragleave', 'drop'].forEach((ev) => {
-          win.addEventListener(ev, () => win.classList.remove('drag-over'));
-        });
-        win.addEventListener('drop', (e) => {
-          e.preventDefault();
-          const files = e.dataTransfer?.files;
-          if (files && files.length > 0) {
-            Array.from(files).slice(0, 3).forEach((f) => {
-              sendItem({
-                from: side,
-                type: 'file',
-                name: f.name,
-                size: formatBytes(f.size),
-                kind: f.type.startsWith('image/') ? 'image' : 'file',
-              });
-            });
+      });
+
+      /* -----------------------------------------------------------------
+         TERMINAL PACKAGE MANAGER SWITCHER
+         ----------------------------------------------------------------- */
+      const PKG_COMMANDS = {
+        brew: 'brew install averywrobinson/tap/lan-line',
+      };
+
+      window.switchPkgManager = function (mgr) {
+        activePkgManager = mgr;
+        const tabBrew = document.getElementById('tabBrew');
+        const cmdEl = document.getElementById('cliCommandText');
+
+        cmdEl.textContent = PKG_COMMANDS[mgr];
+
+        tabBrew.className = 'px-3.5 py-1 rounded-full text-[12px] font-medium bg-white/[0.12] text-white transition-all';
+      };
+
+      window.copyCliCommand = function () {
+        const cmd = PKG_COMMANDS[activePkgManager];
+        copyTextReliable(cmd);
+        const label = document.getElementById('cliCopyLabel');
+        label.textContent = 'Copied';
+        label.classList.add('text-emerald-300');
+        showToast(`Copied: ${cmd}`);
+        setTimeout(() => {
+          label.textContent = 'Copy';
+          label.classList.remove('text-emerald-300');
+        }, 1600);
+      };
+
+      /* -----------------------------------------------------------------
+         DOWNLOAD MODAL LOGIC (WIRED TO GITHUB RELEASES)
+         ----------------------------------------------------------------- */
+      const INSTALLER_META = {
+        macOS: {
+          title: 'Lan-Line for macOS',
+          subtitle: 'v0.9.0-beta.1 · macOS 14+ · Apple Silicon · 2.6 MB DMG',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg',
+          firstOpen: 'Open the DMG and drag Lan-Line to Applications. First open: click Done, then System Settings → Privacy & Security → Open Anyway.',
+        },
+        Windows: {
+          title: 'Lan-Line for Windows',
+          subtitle: 'v0.9.0-beta.1 · Windows 10/11 (x64) · 43 MB setup',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe',
+          firstOpen: 'Run the setup (no admin needed). If SmartScreen appears, choose More info → Run anyway.',
+        },
+      };
+
+      let modalTimers = [];
+      let modalUrl = GITHUB_RELEASES_LATEST_URL;
+
+      window.openDownloadModal = function (os) {
+        const meta = INSTALLER_META[os] || INSTALLER_META.macOS;
+        const modal = document.getElementById('downloadModal');
+        const progress = document.getElementById('modalProgress');
+        const status = document.getElementById('modalStatus');
+        const percent = document.getElementById('modalPercent');
+
+        modalTimers.forEach(clearTimeout);
+        modalTimers = [];
+
+        document.getElementById('modalTitle').textContent = meta.title;
+        document.getElementById('modalSubtitle').textContent = meta.subtitle;
+        document.getElementById('modalReleaseUrl').textContent = meta.url;
+        document.getElementById('modalFirstOpen').textContent = meta.firstOpen;
+        modalUrl = meta.url;
+
+        progress.style.width = '0%';
+        status.textContent = 'Starting your download…';
+        percent.textContent = '0%';
+
+        modal.classList.remove('hidden');
+
+        modalTimers.push(setTimeout(() => {
+          progress.style.width = '55%';
+          status.textContent = 'Downloading from GitHub Releases…';
+          percent.textContent = '55%';
+        }, 150));
+
+        modalTimers.push(setTimeout(() => {
+          progress.style.width = '100%';
+          status.textContent = 'Started — check your Downloads folder';
+          percent.textContent = '100%';
+        }, 700));
+      };
+
+      window.closeDownloadModal = function () {
+        modalTimers.forEach(clearTimeout);
+        document.getElementById('downloadModal').classList.add('hidden');
+      };
+
+      window.copyModalReleaseUrl = function () {
+        copyTextReliable(modalUrl);
+        showToast('Download URL copied');
+      };
+
+      document.getElementById('downloadModal').addEventListener('click', (e) => {
+        if (e.target.id === 'downloadModal') closeDownloadModal();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeDownloadModal();
+      });
+
+      /* -----------------------------------------------------------------
+         FAQ ACCORDION
+         ----------------------------------------------------------------- */
+      const faqItems = document.querySelectorAll('.faq-item');
+      faqItems.forEach((item) => {
+        const trigger = item.querySelector('.faq-trigger');
+        trigger.addEventListener('click', () => {
+          const isOpen = item.getAttribute('data-open') === 'true';
+          faqItems.forEach((other) => {
+            other.setAttribute('data-open', 'false');
+            other.querySelector('.faq-trigger').setAttribute('aria-expanded', 'false');
+          });
+          if (!isOpen) {
+            item.setAttribute('data-open', 'true');
+            trigger.setAttribute('aria-expanded', 'true');
           }
         });
       });
 
-      // Pin toggles
-      document.querySelectorAll('[data-pin]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const isPinned = btn.classList.toggle('pinned');
-          showToast(isPinned ? 'Pinned always-on-top' : 'Unpinned window');
-        });
-      });
-
-      // Minimize / Restore
-      document.querySelectorAll('[data-minimize]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const side = btn.getAttribute('data-minimize');
-          (side === 'mac' ? winMac : winPc).classList.add('minimized-state');
-          showToast(`${side === 'mac' ? 'macOS' : 'Windows PC'} minimized — send a drop to wake it`);
-        });
-      });
-
-      document.querySelectorAll('[data-restore]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const side = btn.getAttribute('data-restore');
-          (side === 'mac' ? winMac : winPc).classList.remove('minimized-state');
-        });
-      });
-
-      // Quick actions
-      document.getElementById('btn-sample-img').addEventListener('click', () => {
-        sendItem({ from: 'mac', type: 'file', name: timestampName(), size: '184 KB', kind: 'image' });
-      });
-
-      document.getElementById('btn-sample-file').addEventListener('click', () => {
-        sendItem({ from: 'pc', type: 'file', name: 'lan-line-config.json', size: '1.8 KB', kind: 'file' });
-      });
-
-      document.getElementById('btn-demo-wake').addEventListener('click', () => {
-        winPc.classList.add('minimized-state');
-        showToast('Windows PC minimized… sending drop from Mac');
-        setTimeout(() => {
-          sendItem({ from: 'mac', type: 'text', text: 'Pop-up test: woke your Windows PC ✓' });
-        }, 750);
-      });
-
-      document.querySelectorAll('[data-action="clear"]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          winMac.classList.remove('minimized-state');
-          winPc.classList.remove('minimized-state');
-          items = initialItems.map((x) => ({ ...x }));
-          renderAll();
-        });
-      });
-
-      // Mouse-following specular highlight on Bento cards
-      document.querySelectorAll('.bento-card').forEach((card) => {
-        card.addEventListener('mousemove', (e) => {
-          const rect = card.getBoundingClientRect();
-          card.style.setProperty('--mx', (e.clientX - rect.left) + 'px');
-          card.style.setProperty('--my', (e.clientY - rect.top) + 'px');
-        });
-      });
-
-      // CLI Tabs
-      const cliCommands = {
-        brew: 'brew install --cask averywrobinson/tap/lan-line',
-      };
-      const cliEl = document.getElementById('cli-command');
-      document.querySelectorAll('.cli-tab').forEach((tab) => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.cli-tab').forEach((t) => t.classList.remove('active'));
-          tab.classList.add('active');
-          cliEl.textContent = cliCommands[tab.getAttribute('data-cli')];
-        });
-      });
-
-      document.getElementById('btn-copy-cli').addEventListener('click', () => {
-        navigator.clipboard?.writeText(cliEl.textContent).catch(() => {});
-        showToast('Install command copied');
-      });
-
-      // FAQ Accordion
-      document.querySelectorAll('.faq-q').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const item = btn.parentElement;
-          const wasOpen = item.classList.contains('open');
-          document.querySelectorAll('.faq-item').forEach((i) => i.classList.remove('open'));
-          if (!wasOpen) item.classList.add('open');
-        });
-      });
-
-      // Download Modal
-      const modal = document.getElementById('download-modal');
-      document.querySelectorAll('[data-open-modal]').forEach((el) => {
-        el.addEventListener('click', (e) => {
-          if (el.tagName === 'BUTTON') e.preventDefault();
-          const platform = el.getAttribute('data-open-modal');
-          document.getElementById('modal-title').textContent = 'Download Lan-Line';
-          modal.classList.add('open');
-        });
-      });
-
-      document.getElementById('modal-close').addEventListener('click', () => modal.classList.remove('open'));
-      modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.remove('open'); });
-
-      // Suggest the visitor's own platform in the download chooser
-      const ua = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
-      const onWin = /win/i.test(ua);
-      document.getElementById(onWin ? 'pick-win' : 'pick-mac').classList.add('suggested');
-
-      // Initial render
-      items = initialItems.map((x) => ({ ...x }));
-      renderAll();
+      /* -----------------------------------------------------------------
+         BOOT INITIAL SIMULATOR STATE
+         ----------------------------------------------------------------- */
+      messages = INITIAL_MESSAGES.map((m) => ({ ...m }));
+      renderAllFeeds();
     })();
   </script>
 </body>
