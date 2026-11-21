@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+.swiftpm/
+bin/
+obj/
+publish/
+publish-sc/
+dist/
+*.user
+config.json

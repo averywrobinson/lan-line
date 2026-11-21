@@ -1,0 +1,48 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for trying the Lan-Line beta. A few details make a bug much easier to fix.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lan-Line version
+      description: Mac: Lan-Line → About Lan-Line. Windows: Settings → Apps → Lan-Line.
+      placeholder: 0.9.0-beta.1
+    validations:
+      required: true
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Which computers?
+      options:
+        - Mac ↔ Windows
+        - Mac ↔ Mac
+        - Windows ↔ Windows
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS versions
+      placeholder: macOS 15.3 (M2) and Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Network
+      description: Wi-Fi or Ethernet, VPN, guest network, VLANs, firewall software — anything unusual.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or anything else

@@ -1,0 +1,2022 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lan-Line — Drop here. Grab there.</title>
+  <meta name="description" content="Two pinned desktop windows. One direct local bridge between Mac and Windows. Drop files, paste screenshots, or send text on one machine — grab them immediately on the other. Zero cloud." />
+  <link rel="canonical" href="https://lan-line.averywrobinson.com/" />
+  <meta name="theme-color" content="#080A0F" />
+
+  <!-- Icons -->
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://lan-line.averywrobinson.com/" />
+  <meta property="og:title" content="Lan-Line — Drop here. Grab there." />
+  <meta property="og:description" content="A quiet, pinned smoked-glass window on both of your computers. Move files, pasted screenshots, and text between Mac and PC over local LAN — zero cloud." />
+  <meta property="og:image" content="https://lan-line.averywrobinson.com/og-card.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Lan-Line — Drop here. Grab there." />
+  <meta name="twitter:description" content="Two pinned desktop windows. One direct local bridge between Mac and Windows. Zero cloud, zero accounts." />
+  <meta name="twitter:image" content="https://lan-line.averywrobinson.com/og-card.png" />
+
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-obsidian: #080A0F;
+      --bg-elevated: #0E121A;
+      --glass-surface: rgba(24, 29, 38, 0.72);
+      --glass-surface-strong: rgba(20, 25, 34, 0.86);
+      --glass-border: rgba(255, 255, 255, 0.11);
+      --glass-border-top: rgba(255, 255, 255, 0.24);
+      --bubble-out: rgba(68, 74, 86, 0.68);
+      --bubble-in: rgba(38, 59, 84, 0.78);
+      --emerald: #34D359;
+      --pin-coral: #E0463A;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --accent-mist: #93C5FD;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background-color: var(--bg-obsidian);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+      line-height: 1.55;
+    }
+
+    /* Subtle 2% Film Grain Overlay */
+    .grain-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 60;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* Ambient Studio Lighting */
+    .studio-glow {
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(1150px, 100vw);
+      height: 680px;
+      background:
+        radial-gradient(ellipse 46% 42% at 32% 52%, rgba(96, 148, 214, 0.17), transparent 72%),
+        radial-gradient(ellipse 46% 42% at 68% 52%, rgba(148, 163, 184, 0.14), transparent 72%),
+        radial-gradient(ellipse 35% 30% at 50% 42%, rgba(226, 232, 240, 0.08), transparent 70%);
+      filter: blur(24px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Navigation */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      background: rgba(8, 10, 15, 0.72);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .nav-inner {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 16px;
+      display: inline-block;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.18s ease;
+    }
+
+    .nav-links a:hover { color: var(--text-primary); }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 13px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-decoration: none;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+      transition: all 0.18s ease;
+      cursor: pointer;
+    }
+
+    .btn-ghost:hover {
+      color: var(--text-primary);
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 11px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #090C12;
+      background: linear-gradient(180deg, #FFFFFF 0%, #E2E8F0 100%);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      text-decoration: none;
+      box-shadow: 0 6px 24px rgba(147, 197, 253, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      transition: transform 0.16s ease, box-shadow 0.16s ease;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 30px rgba(147, 197, 253, 0.24), inset 0 1px 0 #FFFFFF;
+    }
+
+    .btn-glass {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 11px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top-color: rgba(255, 255, 255, 0.22);
+      text-decoration: none;
+      backdrop-filter: blur(14px);
+      transition: all 0.18s ease;
+      cursor: pointer;
+    }
+
+    .btn-glass:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    /* Hero */
+    .hero {
+      position: relative;
+      padding: 72px 0 40px;
+      text-align: center;
+    }
+
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-top-color: rgba(255, 255, 255, 0.22);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #CBD5E1;
+      margin-bottom: 24px;
+      backdrop-filter: blur(12px);
+    }
+
+    .dot-emerald {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 10px rgba(52, 211, 89, 0.75);
+      flex-shrink: 0;
+    }
+
+    .dot-idle {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #64748B;
+      flex-shrink: 0;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.65rem, 5.8vw, 4.4rem);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1.06;
+      background: linear-gradient(180deg, #FFFFFF 20%, #CBD5E1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 18px;
+    }
+
+    .hero-sub {
+      max-width: 610px;
+      margin: 0 auto 30px;
+      font-size: clamp(1rem, 1.8vw, 1.15rem);
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .hero-ctas {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 52px;
+    }
+
+    /* Dual-Window Smoked-Glass Simulator */
+    .simulator-stage {
+      position: relative;
+      margin: 0 auto;
+      max-width: 1020px;
+    }
+
+    .simulator-grid {
+      display: grid;
+      grid-template-columns: 1fr 112px 1fr;
+      align-items: center;
+      gap: 0;
+    }
+
+    .glass-window {
+      position: relative;
+      background: var(--glass-surface);
+      backdrop-filter: blur(28px) saturate(140%);
+      -webkit-backdrop-filter: blur(28px) saturate(140%);
+      border: 1px solid var(--glass-border);
+      border-top: 1px solid var(--glass-border-top);
+      box-shadow:
+        0 28px 70px rgba(0, 0, 0, 0.62),
+        0 2px 12px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      display: flex;
+      flex-direction: column;
+      height: 392px;
+      text-align: left;
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease, border-color 0.2s ease, box-shadow 0.25s ease;
+      overflow: hidden;
+    }
+
+    .glass-window.mac-win { border-radius: 18px; }
+    .glass-window.pc-win { border-radius: 12px; }
+
+    .glass-window.drag-over {
+      border-color: rgba(147, 197, 253, 0.68);
+      box-shadow:
+        0 28px 70px rgba(0, 0, 0, 0.62),
+        0 0 0 2px rgba(147, 197, 253, 0.3),
+        inset 0 0 36px rgba(147, 197, 253, 0.08);
+    }
+
+    .glass-window.waking {
+      animation: wakePop 0.48s cubic-bezier(0.22, 1, 0.36, 1);
+      border-color: rgba(52, 211, 89, 0.52);
+    }
+
+    @keyframes wakePop {
+      0% { transform: scale(0.94) translateY(14px); opacity: 0.4; }
+      60% { transform: scale(1.015) translateY(-2px); opacity: 1; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    .glass-window.minimized-state {
+      height: 76px;
+      opacity: 0.72;
+      justify-content: center;
+    }
+
+    .glass-window.minimized-state .win-messages,
+    .glass-window.minimized-state .win-input-bar {
+      display: none;
+    }
+
+    .win-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      user-select: none;
+    }
+
+    .mac-lights {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: 60px;
+    }
+
+    .light-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      transition: filter 0.15s ease;
+    }
+
+    .light-dot:hover { filter: brightness(1.18); }
+    .light-red { background: #FF5F56; }
+    .light-yellow { background: #FFBD2E; }
+    .light-green { background: #27C93F; }
+
+    .win-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #E2E8F0;
+      letter-spacing: -0.01em;
+    }
+
+    .win-right-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 60px;
+    }
+
+    .pin-btn {
+      background: transparent;
+      border: none;
+      color: #64748B;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.16s ease;
+    }
+
+    .pin-btn.pinned { color: var(--pin-coral); background: rgba(224, 70, 58, 0.12); }
+    .pin-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
+    .pc-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pc-ctrl-btn {
+      width: 24px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      color: #94A3B8;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .pc-ctrl-btn:hover { background: rgba(255, 255, 255, 0.09); color: #FFFFFF; }
+
+    .win-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: #94A3B8;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    }
+
+    .win-status-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .win-restore-btn {
+      display: none;
+      font-family: var(--font-sans);
+      font-size: 11.5px;
+      color: var(--accent-mist);
+      background: rgba(147, 197, 253, 0.1);
+      border: 1px solid rgba(147, 197, 253, 0.25);
+      border-radius: 6px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+
+    .glass-window.minimized-state .win-restore-btn { display: inline-flex; }
+
+    .win-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.14) transparent;
+    }
+
+    .bubble {
+      max-width: 86%;
+      padding: 9px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.45;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      position: relative;
+      animation: bubbleIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes bubbleIn {
+      from { opacity: 0; transform: translateY(6px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .bubble.out {
+      align-self: flex-end;
+      background: var(--bubble-out);
+      border-top-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .bubble.in {
+      align-self: flex-start;
+      background: var(--bubble-in);
+      border-color: rgba(147, 197, 253, 0.2);
+      border-top-color: rgba(147, 197, 253, 0.32);
+    }
+
+    .bubble-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .file-icon-box {
+      width: 30px;
+      height: 34px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .file-meta {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .file-name {
+      font-weight: 500;
+      color: #F8FAFC;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 190px;
+    }
+
+    .file-size {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #CBD5E1;
+      opacity: 0.78;
+    }
+
+    .bubble-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-left: auto;
+      padding-left: 6px;
+      flex-shrink: 0;
+    }
+
+    .copy-chip-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #CBD5E1;
+      border-radius: 6px;
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .copy-chip-btn:hover { background: rgba(255, 255, 255, 0.18); color: #FFFFFF; }
+    .copy-chip-btn.copied { color: var(--emerald); border-color: rgba(52, 211, 89, 0.45); background: rgba(52, 211, 89, 0.12); }
+
+    .check-mark {
+      font-size: 11px;
+      color: #CBD5E1;
+      opacity: 0.75;
+    }
+
+    .win-input-bar {
+      padding: 10px 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(10, 13, 19, 0.42);
+    }
+
+    .win-input {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 9px;
+      padding: 8px 11px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      outline: none;
+      transition: border-color 0.16s ease, background 0.16s ease;
+    }
+
+    .win-input::placeholder { color: #64748B; }
+    .win-input:focus {
+      border-color: rgba(147, 197, 253, 0.42);
+      background: rgba(255, 255, 255, 0.075);
+    }
+
+    .send-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.12);
+      color: #F8FAFC;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.16s ease;
+    }
+
+    .send-btn:hover { background: rgba(255, 255, 255, 0.24); transform: translateY(-1px); }
+
+    /* Center Luminous Filament */
+    .bridge-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      height: 120px;
+    }
+
+    .filament-track {
+      position: relative;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(148,163,184,0.22), rgba(186,230,253,0.75), rgba(148,163,184,0.22));
+      box-shadow: 0 0 14px rgba(147, 197, 253, 0.45);
+    }
+
+    .filament-core-dot {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      box-shadow: 0 0 12px 3px rgba(147, 197, 253, 0.85);
+    }
+
+    .filament-pulse {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 26px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, #FFFFFF, transparent);
+      box-shadow: 0 0 16px 3px rgba(147, 197, 253, 0.95);
+      transform: translateY(-50%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .filament-pulse.pulse-right {
+      animation: pulseRight 0.46s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    .filament-pulse.pulse-left {
+      animation: pulseLeft 0.46s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    @keyframes pulseRight {
+      0% { left: -10%; opacity: 0; }
+      20% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { left: 95%; opacity: 0; }
+    }
+
+    @keyframes pulseLeft {
+      0% { left: 95%; opacity: 0; }
+      20% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { left: -10%; opacity: 0; }
+    }
+
+    .latency-badge {
+      margin-top: 14px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: #94A3B8;
+      background: rgba(15, 20, 29, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* Simulator Quick Actions */
+    .sim-toolbar {
+      margin-top: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .sim-pill-btn {
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #CBD5E1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      padding: 7px 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.16s ease;
+    }
+
+    .sim-pill-btn:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.22);
+      color: #FFFFFF;
+    }
+
+    .sim-hint {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Sections */
+    .section {
+      padding: 96px 0 0;
+    }
+
+    .section-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent-mist);
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: clamp(1.85rem, 3.6vw, 2.65rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 14px;
+    }
+
+    .section-lead {
+      max-width: 620px;
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    /* Contrast Strip */
+    .contrast-grid {
+      margin-top: 36px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .contrast-card {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-top-color: rgba(255, 255, 255, 0.15);
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .contrast-old {
+      font-size: 12.5px;
+      font-family: var(--font-mono);
+      color: #64748B;
+      text-decoration: line-through;
+      margin-bottom: 8px;
+    }
+
+    .contrast-card h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #F1F5F9;
+    }
+
+    .contrast-card p {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    /* Bento Grid with Specular Hover */
+    .bento-grid {
+      margin-top: 40px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .bento-card {
+      position: relative;
+      background: rgba(20, 25, 34, 0.66);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 18px;
+      padding: 26px;
+      overflow: hidden;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .bento-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 0%), rgba(147, 197, 253, 0.11), transparent 65%);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+    }
+
+    .bento-card:hover::before { opacity: 1; }
+    .bento-card:hover { border-color: rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
+
+    .bento-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 11px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      color: #E2E8F0;
+    }
+
+    .bento-card h3 {
+      font-size: 16.5px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      margin-bottom: 8px;
+    }
+
+    .bento-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* Steps */
+    .steps-grid {
+      margin-top: 38px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .step-card {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 26px;
+    }
+
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--emerald);
+      margin-bottom: 12px;
+      display: inline-block;
+    }
+
+    .step-card h3 {
+      font-size: 16.5px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .step-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* Download Card */
+    .download-card {
+      margin-top: 36px;
+      background: linear-gradient(180deg, rgba(26, 33, 46, 0.78) 0%, rgba(15, 19, 27, 0.88) 100%);
+      backdrop-filter: blur(26px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 24px;
+      padding: 44px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 40px;
+      align-items: center;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    }
+
+    .perks-list {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+      margin: 20px 0 28px;
+    }
+
+    .perks-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: #CBD5E1;
+    }
+
+    .download-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .cli-box {
+      background: rgba(7, 9, 14, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .cli-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .cli-tab {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 5px 11px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #94A3B8;
+      cursor: pointer;
+    }
+
+    .cli-tab.active {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.14);
+      color: #FFFFFF;
+    }
+
+    .cli-code-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      color: #E2E8F0;
+    }
+
+    .cli-links {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 12.5px;
+    }
+
+    .cli-links a {
+      color: #94A3B8;
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .cli-links a:hover { color: #FFFFFF; }
+
+    /* FAQ */
+    .faq-list {
+      margin-top: 32px;
+      display: grid;
+      gap: 12px;
+      max-width: 780px;
+    }
+
+    .faq-item {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .faq-q {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: none;
+      padding: 18px 22px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 15.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      cursor: pointer;
+    }
+
+    .faq-plus {
+      font-family: var(--font-mono);
+      color: #94A3B8;
+      transition: transform 0.2s ease;
+    }
+
+    .faq-item.open .faq-plus { transform: rotate(45deg); color: #FFFFFF; }
+
+    .faq-a {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.26s ease;
+    }
+
+    .faq-item.open .faq-a { max-height: 220px; }
+
+    .faq-a p {
+      padding: 0 22px 20px;
+      color: var(--text-secondary);
+      font-size: 14.5px;
+      line-height: 1.65;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 110px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 36px 0 48px;
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 13.5px;
+      color: var(--text-muted);
+    }
+
+    .footer-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .footer-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.16s ease;
+    }
+
+    .footer-links a:hover { color: #FFFFFF; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 6, 10, 0.72);
+      backdrop-filter: blur(12px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 80;
+    }
+
+    .modal-backdrop.open { display: flex; }
+
+    .modal-card {
+      width: 100%;
+      max-width: 470px;
+      background: var(--glass-surface-strong);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-top-color: rgba(255, 255, 255, 0.28);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
+      text-align: left;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .modal-close {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #CBD5E1;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .modal-url-box {
+      margin: 16px 0 20px;
+      padding: 11px 12px;
+      background: rgba(8, 10, 15, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: #CBD5E1;
+      word-break: break-all;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      background: rgba(18, 24, 34, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      color: #F8FAFC;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.22s ease;
+      z-index: 90;
+    }
+
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Beta notes: small and quiet */
+    .beta-tag {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      letter-spacing: 0.04em;
+      color: #FBBF24;
+      background: rgba(251, 191, 36, 0.10);
+      border: 1px solid rgba(251, 191, 36, 0.28);
+      border-radius: 999px;
+      padding: 1px 7px;
+    }
+
+    .beta-note {
+      margin-top: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .beta-note a { color: var(--text-secondary); }
+    .beta-note a:hover { color: var(--text-primary); }
+
+    .req-list {
+      list-style: none;
+      display: grid;
+      gap: 8px;
+      margin-top: 16px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+
+    .req-list b { color: #E2E8F0; font-weight: 500; }
+
+    .platform-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 18px 0 14px;
+    }
+
+    .platform-card {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 14px;
+      border-radius: 14px;
+      text-decoration: none;
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top-color: rgba(255, 255, 255, 0.22);
+      transition: background 0.16s ease, border-color 0.16s ease;
+    }
+
+    .platform-card:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.24); }
+    .platform-card .pc-name { font-weight: 600; font-size: 14.5px; }
+    .platform-card .pc-file { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+    .platform-card.suggested { border-color: rgba(147, 197, 253, 0.45); }
+
+    /* Responsive */
+    @media (max-width: 960px) {
+      .simulator-grid {
+        grid-template-columns: 1fr;
+        max-width: 500px;
+        margin: 0 auto;
+      }
+      .bridge-column {
+        height: 68px;
+        flex-direction: row;
+        gap: 14px;
+      }
+      .filament-track {
+        width: 2px;
+        height: 56px;
+        background: linear-gradient(180deg, rgba(148,163,184,0.22), rgba(186,230,253,0.75), rgba(148,163,184,0.22));
+      }
+      .latency-badge { margin-top: 0; }
+      .contrast-grid { grid-template-columns: repeat(2, 1fr); }
+      .bento-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps-grid { grid-template-columns: 1fr; }
+      .download-card { grid-template-columns: 1fr; padding: 30px; }
+      .platform-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .contrast-grid, .bento-grid { grid-template-columns: 1fr; }
+      .hero { padding-top: 48px; }
+    }
+  </style>
+</head>
+<body id="top">
+  <div class="grain-overlay" aria-hidden="true"></div>
+
+  <!-- Navigation -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="#top" class="brand" aria-label="Lan-Line home">
+        <svg class="brand-mark" viewBox="0 0 38 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1.5" y="3.5" width="12" height="13" rx="3.2" stroke="#F8FAFC" stroke-width="1.8" />
+          <rect x="24.5" y="3.5" width="12" height="13" rx="3.2" stroke="#94A3B8" stroke-width="1.8" />
+          <line x1="14" y1="10" x2="24" y2="10" stroke="#E2E8F0" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+        <span>Lan-Line</span>
+        <span class="beta-tag">BETA</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#download">Download</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a class="btn-ghost" href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.38-5.26 5.67.42.36.79 1.07.79 2.15 0 1.55-.01 2.8-.01 3.18 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a class="btn-primary" href="#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero + Live Bridge Simulator -->
+    <section class="hero">
+      <div class="studio-glow" aria-hidden="true"></div>
+      <div class="container">
+        <div class="pill-badge">
+          <span class="dot-emerald"></span>
+          <span>Public beta · macOS &amp; Windows · Local LAN</span>
+        </div>
+
+        <h1>Drop here. Grab there.</h1>
+        <p class="hero-sub">
+          Lan-Line is a tiny, pinned smoked-glass window on both of your computers. Drop a file, paste a screenshot, or send a link on one machine — it lands on the other instantly.
+        </p>
+
+        <div class="hero-ctas">
+          <button type="button" class="btn-primary" data-open-modal="macOS & Windows">
+            Download Lan-Line
+          </button>
+          <a href="#features" class="btn-glass">Explore features</a>
+        </div>
+
+        <!-- Interactive Dual-Window Simulator -->
+        <div class="simulator-stage" aria-label="Interactive two-window Lan-Line simulator">
+          <div class="simulator-grid">
+            <!-- macOS Window -->
+            <div class="glass-window mac-win" id="win-mac" data-side="mac">
+              <div class="win-titlebar">
+                <div class="mac-lights">
+                  <button type="button" class="light-dot light-red" title="Clear feed" data-action="clear"></button>
+                  <button type="button" class="light-dot light-yellow" title="Minimize window" data-minimize="mac"></button>
+                  <button type="button" class="light-dot light-green" title="Restore window" data-restore="mac"></button>
+                </div>
+                <span class="win-title">Lan-Line</span>
+                <div class="win-right-controls">
+                  <button type="button" class="pin-btn pinned" title="Toggle Always-on-Top" data-pin="mac" aria-label="Pin macOS window">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="win-status">
+                <div class="win-status-left">
+                  <span class="dot-emerald" id="dot-mac"></span>
+                  <span id="status-mac">Connected · Studio PC</span>
+                </div>
+                <button type="button" class="win-restore-btn" data-restore="mac">Restore</button>
+              </div>
+              <div class="win-messages" id="feed-mac"></div>
+              <form class="win-input-bar" data-form="mac">
+                <input type="text" class="win-input" id="input-mac" placeholder="Type, paste screenshot, or drop file…" autocomplete="off" />
+                <button type="submit" class="send-btn" aria-label="Send from Mac">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </button>
+              </form>
+            </div>
+
+            <!-- Luminous Filament -->
+            <div class="bridge-column" aria-hidden="true">
+              <div class="filament-track">
+                <span class="filament-core-dot"></span>
+                <span class="filament-pulse" id="filament-pulse"></span>
+              </div>
+              <span class="latency-badge" id="latency-badge">direct · LAN</span>
+            </div>
+
+            <!-- Windows 11 Window -->
+            <div class="glass-window pc-win" id="win-pc" data-side="pc">
+              <div class="win-titlebar">
+                <span class="win-title">Lan-Line</span>
+                <div class="win-right-controls">
+                  <button type="button" class="pin-btn pinned" title="Toggle Always-on-Top" data-pin="pc" aria-label="Pin Windows window">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
+                  </button>
+                  <div class="pc-controls">
+                    <button type="button" class="pc-ctrl-btn" title="Minimize" data-minimize="pc">—</button>
+                    <button type="button" class="pc-ctrl-btn" title="Restore" data-restore="pc">□</button>
+                    <button type="button" class="pc-ctrl-btn" title="Clear feed" data-action="clear">×</button>
+                  </div>
+                </div>
+              </div>
+              <div class="win-status">
+                <div class="win-status-left">
+                  <span class="dot-emerald" id="dot-pc"></span>
+                  <span id="status-pc">Connected · MacBook Pro</span>
+                </div>
+                <button type="button" class="win-restore-btn" data-restore="pc">Restore</button>
+              </div>
+              <div class="win-messages" id="feed-pc"></div>
+              <form class="win-input-bar" data-form="pc">
+                <input type="text" class="win-input" id="input-pc" placeholder="Type, paste screenshot, or drop file…" autocomplete="off" />
+                <button type="submit" class="send-btn" aria-label="Send from Windows">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Interactive Simulator Toolbar -->
+          <div class="sim-toolbar">
+            <button type="button" class="sim-pill-btn" id="btn-sample-img">Paste Screenshot (Mac → PC)</button>
+            <button type="button" class="sim-pill-btn" id="btn-sample-file">Drop Config File (PC → Mac)</button>
+            <button type="button" class="sim-pill-btn" id="btn-demo-wake">Demo Wake-on-Receive</button>
+            <button type="button" class="sim-pill-btn" data-action="clear">Reset Demo</button>
+          </div>
+          <p class="sim-hint">Tip: You can actually drag files from your desktop onto either window above, or focus an input and press Cmd+V / Ctrl+V with a screenshot.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quiet Contrast Strip -->
+    <section class="section">
+      <div class="container">
+        <div class="section-eyebrow">Why Lan-Line</div>
+        <h2 class="section-title">Two computers shouldn’t feel like two planets.</h2>
+        <p class="section-lead">
+          Your Mac and Windows machine sit twelve inches apart. Moving a screenshot, config snippet, or asset shouldn’t require a cloud server, an account, or a workaround.
+        </p>
+
+        <div class="contrast-grid">
+          <div class="contrast-card">
+            <div class="contrast-old">Slack / Discord self-DMs</div>
+            <h3>Zero accounts. Zero compression.</h3>
+            <p>Stop cluttering work chat with screenshots and keys. Files arrive full-resolution over your local network.</p>
+          </div>
+          <div class="contrast-card">
+            <div class="contrast-old">AirDrop / Universal Clipboard</div>
+            <h3>Built for Mac ↔ Windows</h3>
+            <p>No Apple-only walls and no silent clipboard overwrites. Keep a clean, visible drop stream across OSes.</p>
+          </div>
+          <div class="contrast-card">
+            <div class="contrast-old">Cloud Drives</div>
+            <h3>Instant, not synced</h3>
+            <p>No upload queues or leftover junk files clogging Drive or iCloud. Drop it, grab it, move on.</p>
+          </div>
+          <div class="contrast-card">
+            <div class="contrast-old">SMB Network Shares</div>
+            <h3>Text, images &amp; files in one spot</h3>
+            <p>Skip mounting network volumes just to pass a URL, SSH snippet, or 2 KB screenshot across the desk.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Feature Bento Grid -->
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-eyebrow">Crafted for Daily Flow</div>
+        <h2 class="section-title">Small details that make it stick.</h2>
+        <p class="section-lead">Designed to stay quiet until the second you need it—and get out of your way immediately after.</p>
+
+        <div class="bento-grid">
+          <article class="bento-card">
+            <div class="bento-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color:#E0463A"><path d="M16 3l5 5-2 2-2-1-4 4 1 5-2 2-3.5-3.5L4 21l-1-1 4.5-4.5L4 12l2-2 5 1 4-4-1-2 2-2z"/></svg>
+            </div>
+            <h3>Always Pinned</h3>
+            <p>Toggle the pushpin to float Lan-Line cleanly above your active apps—always one drag away, never buried under thirty tabs.</p>
+          </article>
+
+          <article class="bento-card">
+            <div class="bento-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            </div>
+            <h3>Paste Screenshots Directly</h3>
+            <p>Hit Cmd+V or Ctrl+V with a raw image on your clipboard. Lan-Line auto-wraps it into a clean, timestamped PNG chip ready to drag out.</p>
+          </article>
+
+          <article class="bento-card">
+            <div class="bento-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </div>
+            <h3>One-Click Copy &amp; Delivery Checks</h3>
+            <p>Every text bubble and file chip ships with an inline copy button and instant delivery checkmark—no highlighting, no guessing.</p>
+          </article>
+
+          <article class="bento-card">
+            <div class="bento-icon">
+              <span class="dot-emerald" style="width:12px;height:12px;"></span>
+            </div>
+            <h3>Wakes on Receive</h3>
+            <p>Keep Lan-Line minimized while you work. The moment your other machine sends a file or link, the window pops up ready for you.</p>
+          </article>
+
+          <article class="bento-card">
+            <div class="bento-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+            <h3>Direct Local LAN</h3>
+            <p>Machine to machine over your local network. Zero cloud relays, zero logins, no size cap beyond your free disk space.</p>
+          </article>
+
+          <article class="bento-card">
+            <div class="bento-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+            </div>
+            <h3>Live Status at a Glance</h3>
+            <p>Emerald green means linked and ready; slate gray means standing by for your peer. Zero nested preference menus to babysit.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3-Step Workflow -->
+    <section class="section" id="how-it-works">
+      <div class="container">
+        <div class="section-eyebrow">30-Second Setup</div>
+        <h2 class="section-title">Open on both screens. Start dropping.</h2>
+
+        <div class="steps-grid">
+          <div class="step-card">
+            <span class="step-num">01 / CONNECT</span>
+            <h3>Launch on Mac &amp; Windows</h3>
+            <p>Open Lan-Line on both computers. One shows a short pairing code; pick it on the other and type the code. No accounts, no cloud sign-in.</p>
+          </div>
+          <div class="step-card">
+            <span class="step-num">02 / DROP</span>
+            <h3>Drag, paste, or type</h3>
+            <p>Throw in a file, paste a clipboard screenshot, or send a link or terminal snippet. Works identically in both directions.</p>
+          </div>
+          <div class="step-card">
+            <span class="step-num">03 / GRAB</span>
+            <h3>Copy or drag straight out</h3>
+            <p>The receiving window wakes up instantly. Click copy on text or drag the file chip straight into Finder, Explorer, or any open app.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download Card -->
+    <section class="section" id="download">
+      <div class="container">
+        <div class="download-card">
+          <div>
+            <div class="section-eyebrow">Public beta · v0.9.0-beta.1</div>
+            <h2 class="section-title" style="margin-bottom:10px;">Get Lan-Line.</h2>
+            <p style="color:var(--text-secondary);font-size:15px;line-height:1.6;">
+              A normal installer for each computer. Install it on both, pair once with a short code, and start dropping.
+            </p>
+            <ul class="perks-list">
+              <li><span class="dot-emerald"></span> macOS 14 or later (Apple Silicon) · Windows 10/11 (64-bit)</li>
+              <li><span class="dot-emerald"></span> 100% local LAN transfers — no accounts, no telemetry</li>
+              <li><span class="dot-emerald"></span> Files, text snippets &amp; pasted PNGs — as big as your disk allows</li>
+            </ul>
+            <div class="download-btns">
+              <a class="btn-primary" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg" data-platform="mac">
+                Download for macOS
+              </a>
+              <a class="btn-glass" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe" data-platform="win">
+                Download for Windows
+              </a>
+            </div>
+            <p class="beta-note">
+              <span class="beta-tag">BETA</span>&nbsp; This is an early build and hasn’t been tested thoroughly yet, so expect rough edges.
+              The apps aren’t code-signed yet, so the first open asks for a one-time OK: on a Mac, System Settings → Privacy &amp; Security → Open Anyway; on Windows, More info → Run anyway.
+              Found a problem? <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer">Open an issue</a>.
+            </p>
+          </div>
+
+          <div class="cli-box">
+            <div class="cli-tabs" role="tablist">
+              <button type="button" class="cli-tab active" data-cli="brew">Homebrew (macOS)</button>
+            </div>
+            <div class="cli-code-row">
+              <code id="cli-command">brew install --cask averywrobinson/tap/lan-line</code>
+              <button type="button" class="copy-chip-btn" id="btn-copy-cli" title="Copy command" aria-label="Copy install command">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <ul class="req-list">
+              <li><b>macOS:</b> DMG, drag Lan-Line to Applications. Apple Silicon, macOS 14+.</li>
+              <li><b>Windows:</b> one-click setup, no admin needed, .NET included. Windows 10 (1809+) or 11, 64-bit.</li>
+              <li><b>Both:</b> on the same network. Allow Lan-Line through the firewall if asked.</li>
+            </ul>
+            <div class="cli-links">
+              <a href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">Source Code ↗</a>
+              <a href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">All Releases ↗</a>
+              <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer">Report Issue ↗</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="container">
+        <div class="section-eyebrow">Questions</div>
+        <h2 class="section-title">Straight answers.</h2>
+
+        <div class="faq-list">
+          <div class="faq-item">
+            <button type="button" class="faq-q">
+              <span>Is Lan-Line finished?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>Not yet. v0.9.0-beta.1 is a public beta: it works day to day, but it hasn’t been tested thoroughly on many networks and machines. If something breaks, please <a href="https://github.com/averywrobinson/lan-line/issues/new/choose" target="_blank" rel="noopener noreferrer" style="color:var(--text-secondary);">open an issue</a> with your OS versions and what happened.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-q">
+              <span>Why does my computer warn me the first time I open it?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>The beta isn’t code-signed yet. On a Mac, macOS says it can’t verify the app: click Done, then open System Settings → Privacy &amp; Security and click Open Anyway. On Windows, SmartScreen shows “Windows protected your PC”: choose More info → Run anyway. You only do this once.</p>
+            </div>
+          </div>
+
+          <div class="faq-item open">
+            <button type="button" class="faq-q">
+              <span>Do my files or snippets ever touch the cloud?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>Never. Lan-Line connects Computer A and Computer B directly over your local network (LAN). Your files, screenshots, API keys, and links stay inside your room.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-q">
+              <span>Does it work between macOS and Windows?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>Yes—Mac ↔ Windows is the reason Lan-Line exists. It also pairs two Macs or two Windows PCs: one computer shows a code, the other types it.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-q">
+              <span>Why not just use a shared clipboard or KVM?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>Shared clipboards silently overwrite what you just copied and break on multi-file drops. Lan-Line gives you a visible, scrollable smoked-glass tray so nothing vanishes before you grab it.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-q">
+              <span>What happens when I paste a screenshot from my clipboard?</span>
+              <span class="faq-plus">+</span>
+            </button>
+            <div class="faq-a">
+              <p>Lan-Line automatically wraps raw clipboard image data into a clean, timestamped PNG file chip (e.g., <code>pasted-20261120-183018.png</code>) that you can drag straight into any folder or app on the receiving computer.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <svg class="brand-mark" viewBox="0 0 38 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1.5" y="3.5" width="12" height="13" rx="3.2" stroke="#94A3B8" stroke-width="1.8" />
+          <rect x="24.5" y="3.5" width="12" height="13" rx="3.2" stroke="#64748B" stroke-width="1.8" />
+          <line x1="14" y1="10" x2="24" y2="10" stroke="#94A3B8" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+        <span>Lan-Line · Drop here. Grab there. · <span style="font-family:var(--font-mono);font-size:12px;">v0.9.0-beta.1</span> · MIT</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href="https://github.com/averywrobinson/lan-line/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+        <a href="#top">Back to top ↑</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Download Modal -->
+  <div class="modal-backdrop" id="download-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title" style="font-size:18px;font-weight:600;">Download Lan-Line</h3>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Close">×</button>
+      </div>
+      <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.6;">
+        Install it on both computers, then pair them once with a short code.
+      </p>
+      <div class="platform-grid">
+        <a class="platform-card" id="pick-mac" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-mac.dmg">
+          <span class="pc-name">macOS</span>
+          <span class="pc-file">Lan-Line-0.9.0-beta.1-mac.dmg · 2.6 MB</span>
+        </a>
+        <a class="platform-card" id="pick-win" href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.1/Lan-Line-0.9.0-beta.1-windows-setup.exe">
+          <span class="pc-name">Windows</span>
+          <span class="pc-file">Lan-Line-0.9.0-beta.1-windows-setup.exe · 43 MB</span>
+        </a>
+      </div>
+      <p class="beta-note" style="margin-top:0;">
+        <span class="beta-tag">BETA</span>&nbsp; Early build, not thoroughly tested yet. Not code-signed yet, so the first open asks for a one-time OK (Mac: System Settings → Privacy &amp; Security → Open Anyway; Windows: More info → Run anyway).
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
+        <a class="btn-glass" style="flex:1;" href="https://github.com/averywrobinson/lan-line/releases" target="_blank" rel="noopener noreferrer">All releases on GitHub</a>
+        <a class="btn-glass" href="https://github.com/averywrobinson/lan-line" target="_blank" rel="noopener noreferrer">Source</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      const feedMac = document.getElementById('feed-mac');
+      const feedPc = document.getElementById('feed-pc');
+      const winMac = document.getElementById('win-mac');
+      const winPc = document.getElementById('win-pc');
+      const pulseEl = document.getElementById('filament-pulse');
+      const latencyEl = document.getElementById('latency-badge');
+      const toastEl = document.getElementById('toast');
+
+      const initialItems = [
+        { from: 'mac', type: 'text', text: 'Updated deck & icons' },
+        { from: 'mac', type: 'file', name: 'hero-export.png', size: '2.4 MB', kind: 'image' },
+      ];
+
+      let items = [];
+      let toastTimer = null;
+
+      function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' bytes';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1).replace(/\.0$/, '') + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      function timestampName() {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        return `pasted-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
+      }
+
+      function copyIconSvg() {
+        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      }
+
+      function fileIconSvg(kind) {
+        if (kind === 'image') {
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+        }
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+      }
+
+      function createBubble(item, perspective) {
+        const isOut = item.from === perspective;
+        const el = document.createElement('div');
+        el.className = 'bubble ' + (isOut ? 'out' : 'in');
+
+        const copyValue = item.type === 'file' ? item.name : item.text;
+
+        if (item.type === 'file') {
+          el.innerHTML = `
+            <div class="bubble-row">
+              <div class="file-icon-box">${fileIconSvg(item.kind)}</div>
+              <div class="file-meta">
+                <span class="file-name"></span>
+                <span class="file-size"></span>
+              </div>
+              <div class="bubble-actions">
+                <button type="button" class="copy-chip-btn" title="Copy filename">${copyIconSvg()}</button>
+                ${isOut ? '<span class="check-mark" title="Delivered">✓</span>' : ''}
+              </div>
+            </div>
+          `;
+          el.querySelector('.file-name').textContent = item.name;
+          el.querySelector('.file-size').textContent = item.size;
+        } else {
+          el.innerHTML = `
+            <div class="bubble-row">
+              <span class="msg-text" style="word-break:break-word;"></span>
+              <div class="bubble-actions">
+                <button type="button" class="copy-chip-btn" title="Copy text">${copyIconSvg()}</button>
+                ${isOut ? '<span class="check-mark" title="Delivered">✓</span>' : ''}
+              </div>
+            </div>
+          `;
+          el.querySelector('.msg-text').textContent = item.text;
+        }
+
+        const copyBtn = el.querySelector('.copy-chip-btn');
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard?.writeText(copyValue).catch(() => {});
+          copyBtn.classList.add('copied');
+          showToast('Copied: ' + (copyValue.length > 36 ? copyValue.slice(0, 36) + '…' : copyValue));
+          setTimeout(() => copyBtn.classList.remove('copied'), 1200);
+        });
+
+        return el;
+      }
+
+      function renderAll() {
+        feedMac.innerHTML = '';
+        feedPc.innerHTML = '';
+        items.forEach((item) => {
+          feedMac.appendChild(createBubble(item, 'mac'));
+          feedPc.appendChild(createBubble(item, 'pc'));
+        });
+        feedMac.scrollTop = feedMac.scrollHeight;
+        feedPc.scrollTop = feedPc.scrollHeight;
+      }
+
+      function triggerPulse(direction) {
+        pulseEl.classList.remove('pulse-right', 'pulse-left');
+        void pulseEl.offsetWidth;
+        pulseEl.classList.add(direction === 'mac' ? 'pulse-right' : 'pulse-left');
+        latencyEl.textContent = direction === 'mac' ? 'Mac → PC · LAN' : 'PC → Mac · LAN';
+      }
+
+      function wakeWindow(side) {
+        const win = side === 'mac' ? winMac : winPc;
+        if (win.classList.contains('minimized-state')) {
+          win.classList.remove('minimized-state');
+          win.classList.remove('waking');
+          void win.offsetWidth;
+          win.classList.add('waking');
+          showToast(`${side === 'pc' ? 'Windows PC' : 'macOS'} window woke up on receive`);
+        }
+      }
+
+      function sendItem(item) {
+        items.push(item);
+        triggerPulse(item.from);
+        const receiver = item.from === 'mac' ? 'pc' : 'mac';
+        setTimeout(() => {
+          wakeWindow(receiver);
+          renderAll();
+        }, 120);
+      }
+
+      // Forms
+      document.querySelectorAll('[data-form]').forEach((form) => {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const side = form.getAttribute('data-form');
+          const input = form.querySelector('.win-input');
+          const val = input.value.trim();
+          if (!val) return;
+          sendItem({ from: side, type: 'text', text: val });
+          input.value = '';
+        });
+      });
+
+      // Clipboard image paste support inside inputs
+      document.querySelectorAll('.win-input').forEach((input) => {
+        input.addEventListener('paste', (e) => {
+          const clipItems = e.clipboardData?.items;
+          if (!clipItems) return;
+          for (const ci of clipItems) {
+            if (ci.type.startsWith('image/')) {
+              e.preventDefault();
+              const file = ci.getAsFile();
+              const side = input.id.endsWith('mac') ? 'mac' : 'pc';
+              sendItem({
+                from: side,
+                type: 'file',
+                name: timestampName(),
+                size: formatBytes(file ? file.size : 48200),
+                kind: 'image',
+              });
+              showToast('Clipboard image wrapped as draggable PNG');
+              return;
+            }
+          }
+        });
+      });
+
+      // Drag and drop files on either window
+      [winMac, winPc].forEach((win) => {
+        const side = win.getAttribute('data-side');
+        ['dragenter', 'dragover'].forEach((ev) => {
+          win.addEventListener(ev, (e) => {
+            e.preventDefault();
+            win.classList.add('drag-over');
+          });
+        });
+        ['dragleave', 'drop'].forEach((ev) => {
+          win.addEventListener(ev, () => win.classList.remove('drag-over'));
+        });
+        win.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const files = e.dataTransfer?.files;
+          if (files && files.length > 0) {
+            Array.from(files).slice(0, 3).forEach((f) => {
+              sendItem({
+                from: side,
+                type: 'file',
+                name: f.name,
+                size: formatBytes(f.size),
+                kind: f.type.startsWith('image/') ? 'image' : 'file',
+              });
+            });
+          }
+        });
+      });
+
+      // Pin toggles
+      document.querySelectorAll('[data-pin]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const isPinned = btn.classList.toggle('pinned');
+          showToast(isPinned ? 'Pinned always-on-top' : 'Unpinned window');
+        });
+      });
+
+      // Minimize / Restore
+      document.querySelectorAll('[data-minimize]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const side = btn.getAttribute('data-minimize');
+          (side === 'mac' ? winMac : winPc).classList.add('minimized-state');
+          showToast(`${side === 'mac' ? 'macOS' : 'Windows PC'} minimized — send a drop to wake it`);
+        });
+      });
+
+      document.querySelectorAll('[data-restore]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const side = btn.getAttribute('data-restore');
+          (side === 'mac' ? winMac : winPc).classList.remove('minimized-state');
+        });
+      });
+
+      // Quick actions
+      document.getElementById('btn-sample-img').addEventListener('click', () => {
+        sendItem({ from: 'mac', type: 'file', name: timestampName(), size: '184 KB', kind: 'image' });
+      });
+
+      document.getElementById('btn-sample-file').addEventListener('click', () => {
+        sendItem({ from: 'pc', type: 'file', name: 'lan-line-config.json', size: '1.8 KB', kind: 'file' });
+      });
+
+      document.getElementById('btn-demo-wake').addEventListener('click', () => {
+        winPc.classList.add('minimized-state');
+        showToast('Windows PC minimized… sending drop from Mac');
+        setTimeout(() => {
+          sendItem({ from: 'mac', type: 'text', text: 'Pop-up test: woke your Windows PC ✓' });
+        }, 750);
+      });
+
+      document.querySelectorAll('[data-action="clear"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          winMac.classList.remove('minimized-state');
+          winPc.classList.remove('minimized-state');
+          items = initialItems.map((x) => ({ ...x }));
+          renderAll();
+        });
+      });
+
+      // Mouse-following specular highlight on Bento cards
+      document.querySelectorAll('.bento-card').forEach((card) => {
+        card.addEventListener('mousemove', (e) => {
+          const rect = card.getBoundingClientRect();
+          card.style.setProperty('--mx', (e.clientX - rect.left) + 'px');
+          card.style.setProperty('--my', (e.clientY - rect.top) + 'px');
+        });
+      });
+
+      // CLI Tabs
+      const cliCommands = {
+        brew: 'brew install --cask averywrobinson/tap/lan-line',
+      };
+      const cliEl = document.getElementById('cli-command');
+      document.querySelectorAll('.cli-tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.cli-tab').forEach((t) => t.classList.remove('active'));
+          tab.classList.add('active');
+          cliEl.textContent = cliCommands[tab.getAttribute('data-cli')];
+        });
+      });
+
+      document.getElementById('btn-copy-cli').addEventListener('click', () => {
+        navigator.clipboard?.writeText(cliEl.textContent).catch(() => {});
+        showToast('Install command copied');
+      });
+
+      // FAQ Accordion
+      document.querySelectorAll('.faq-q').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const item = btn.parentElement;
+          const wasOpen = item.classList.contains('open');
+          document.querySelectorAll('.faq-item').forEach((i) => i.classList.remove('open'));
+          if (!wasOpen) item.classList.add('open');
+        });
+      });
+
+      // Download Modal
+      const modal = document.getElementById('download-modal');
+      document.querySelectorAll('[data-open-modal]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if (el.tagName === 'BUTTON') e.preventDefault();
+          const platform = el.getAttribute('data-open-modal');
+          document.getElementById('modal-title').textContent = 'Download Lan-Line';
+          modal.classList.add('open');
+        });
+      });
+
+      document.getElementById('modal-close').addEventListener('click', () => modal.classList.remove('open'));
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.remove('open'); });
+
+      // Suggest the visitor's own platform in the download chooser
+      const ua = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+      const onWin = /win/i.test(ua);
+      document.getElementById(onWin ? 'pick-win' : 'pick-mac').classList.add('suggested');
+
+      // Initial render
+      items = initialItems.map((x) => ({ ...x }));
+      renderAll();
+    })();
+  </script>
+</body>
+</html>
