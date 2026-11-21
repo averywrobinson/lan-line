@@ -44,6 +44,7 @@ sealed partial class MainWindow
             Run(cfg ?? new LanLineConfig());
         else
             BeginPairing(show: false);   // a PC types the code by default; it can switch
+        SetUpStorage();
     }
 
     /// <summary>Normal operation with a saved pairing.</summary>
@@ -201,8 +202,7 @@ sealed partial class MainWindow
     void SetPairing(bool on)
     {
         _pairing = on;
-        _pairPanel.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-        _body.Visibility = _composer.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        ApplyScreen();
         _cancelLink.Visibility = on && _config != null ? Visibility.Visible : Visibility.Collapsed;
         RefreshStatus();
         if (!on) _input.Focus();
@@ -220,6 +220,9 @@ sealed partial class MainWindow
     ContextMenu StatusMenu()
     {
         var m = new ContextMenu();
+        var settings = new MenuItem { Header = "Settings…" };
+        settings.Click += (_, _) => ShowSettings();
+        m.Items.Add(settings);
         var pair = new MenuItem { Header = "Pair with another computer…" };
         pair.Click += (_, _) => BeginPairing(show: false);
         var pin = new MenuItem { Header = "Keep on top", InputGestureText = "Ctrl+P", IsCheckable = true };

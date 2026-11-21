@@ -1,0 +1,338 @@
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using LanLine.Core;
+
+namespace LanLine.App;
+
+/// <summary>
+/// Storage settings for received files (keep for N days, storage limit, warn or move oldest to the Recycle Bin,
+/// Recycle Bin reminder), the cleanup that applies them, and the first-run gate: until the user presses Save once,
+/// every launch opens on this panel. Same rules as the Mac (LanLine.Core.Cleanup).
+/// </summary>
+sealed partial class MainWindow
+{
+    StorageSettings _storage = new();
+    bool _showingSettings, _settingsFirstRun;
+    DispatcherTimer? _cleanupTimer;
+    FrameworkElement? _settingsPanel;
+    long _usageBytes;
+
+    // panel parts
+    readonly TextBlock _setFirstRun = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new();
+    readonly TextBox _customDays = new(), _customGB = new();
+    Border _customDaysBox = null!, _customGBBox = null!;   // built in BuildSettingsPanel
+    readonly StackPanel _overRow = new();
+    readonly TextBlock _usageText = new() { FontSize = 12, Margin = new Thickness(0, 14, 0, 5) };
+    readonly ProgressBar _usageBar = new() { Height = 5, Maximum = 1 };
+    readonly TextBlock _setError = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
+    readonly Button _setCancel = new() { Content = "Cancel" };
+
+    string SettingsPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "settings.json");
+    string LogPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "received.json");
+    string DownloadsPath => Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir;
+
+    void SetUpStorage()
+    {
+        _storage = StorageSettings.Load(SettingsPath);
+        RunCleanup(manual: false);
+        _cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+        _cleanupTimer.Tick += (_, _) => RunCleanup(manual: false);
+        _cleanupTimer.Start();
+        if (!_storage.Confirmed) ShowSettings(firstRun: true);   // every launch until saved once
+    }
+
+    void ShowSettings(bool firstRun = false)
+    {
+        _settingsFirstRun = firstRun;
+        RefreshUsage();
+        LoadSettingsIntoPanel();
+        _showingSettings = true;
+        if (Height < 600)
+        {
+            var grow = 600 - Height;
+            Height = 600;
+            Top = Math.Max(SystemParameters.WorkArea.Top + 8, Top - grow);
+        }
+        ApplyScreen();
+    }
+
+    void CloseSettings() { _showingSettings = false; ApplyScreen(); }
+
+    /// <summary>Which middle area shows: settings over everything, else pairing, else the feed and composer.</summary>
+    void ApplyScreen()
+    {
+        if (_settingsPanel != null) _settingsPanel.Visibility = _showingSettings ? Visibility.Visible : Visibility.Collapsed;
+        _pairPanel.Visibility = !_showingSettings && _pairing ? Visibility.Visible : Visibility.Collapsed;
+        _body.Visibility = _composer.Visibility = !_showingSettings && !_pairing ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void LogReceived(string path, long size)
+    {
+        var log = ReceivedLog.Load(LogPath);
+        log.RemoveAll(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
+        log.Add(new ReceivedFile(path, size, DateTime.UtcNow));
+        try { ReceivedLog.Save(log, LogPath); } catch (Exception) { }
+        RunCleanup(manual: false);
+    }
+
+    void RefreshUsage() => _usageBytes = ReceivedLog.Load(LogPath).Where(f => File.Exists(f.Path)).Sum(f => f.Size);
+
+    /// <summary>Move expired / over-limit received files to the Recycle Bin, then say so quietly. Never touches anything else.</summary>
+    void RunCleanup(bool manual)
+    {
+        var log = ReceivedLog.Load(LogPath);
+        var existing = log.Where(f => File.Exists(f.Path)).ToList();
+        var now = DateTime.UtcNow;
+        var plan = Cleanup.Plan(existing, _storage, now);
+        var moved = plan.ToTrash.Where(f => RecycleBin.Send(f.Path)).ToList();
+        var movedPaths = moved.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var kept = existing.Where(f => !movedPaths.Contains(f.Path)).ToList();
+        if (kept.Count != log.Count) { try { ReceivedLog.Save(kept, LogPath); } catch (Exception) { } }
+        foreach (var r in _rows.Values) if (r.Path is { } p && movedPaths.Contains(p)) r.MarkRemoved();
+        _usageBytes = kept.Sum(f => f.Size);
+        var changed = false;
+        if (moved.Count > 0)
+        {
+            var why = plan.Expired.Count > 0 ? $"older than {_storage.RetentionDays} day{(_storage.RetentionDays == 1 ? "" : "s")}"
+                                             : $"to stay under your {Cleanup.FormatBytes(plan.LimitBytes)} limit";
+            Note($"Moved {moved.Count} received file{(moved.Count == 1 ? "" : "s")} ({Cleanup.FormatBytes(moved.Sum(f => f.Size))}) to the Recycle Bin, {why}.");
+            if (Cleanup.ShouldRemindTrash(_storage, true, now))
+            {
+                Note("Old received files go to the Recycle Bin. Empty it once you've had a look. (Turn this reminder off in Settings.)");
+                _storage.LastTrashReminder = now; changed = true;
+            }
+        }
+        else if (manual) Note($"Nothing to clean up. Received files use {Cleanup.FormatBytes(plan.UsageBytes)}.");
+        if (Cleanup.ShouldWarnLimit(_storage, plan.Level, now) || (manual && plan.Level > 0))
+        {
+            var used = Cleanup.FormatBytes(plan.UsageBytes); var lim = Cleanup.FormatBytes(plan.LimitBytes);
+            Note(plan.Level == 2 ? $"Received files use {used}, over your {lim} limit. Raise it or turn on cleanup in Settings."
+                                 : $"Received files use {used} of your {lim} limit.");
+            _storage.LastLimitWarning = now; changed = true;
+        }
+        if (changed) { try { _storage.Save(SettingsPath); } catch (Exception) { } }
+        if (_showingSettings) RefreshUsageBar();
+    }
+
+    // ---------- panel
+
+    FrameworkElement BuildSettingsPanel()
+    {
+        _customDaysBox = NumberBox(_customDays, "days", "Days to keep files");
+        _customGBBox = NumberBox(_customGB, "GB", "Storage limit in GB");
+        _customGB.TextChanged += (_, _) => RefreshUsageBar();
+        var col = new StackPanel { Margin = new Thickness(22, 16, 22, 16) };
+        var title = new TextBlock { Text = "Storage for received files", FontSize = 15, FontWeight = FontWeights.SemiBold };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        _setFirstRun.Text = "Choose how Lan-Line keeps received files before you start. You can change this any time from the status line's menu.";
+        _setFirstRun.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
+        col.Children.Add(title);
+        col.Children.Add(_setFirstRun);
+
+        col.Children.Add(Label("Delete received files after"));
+        foreach (var d in StorageSettings.RetentionChoices) _retPills.Children.Add(Pill("ret", d == 0 ? "Never" : d == 1 ? "1 day" : $"{d} days", d));
+        _retPills.Children.Add(Pill("ret", "Custom", -1));
+        col.Children.Add(_retPills);
+        col.Children.Add(_customDaysBox);
+
+        col.Children.Add(Label("Storage limit"));
+        foreach (var g in StorageSettings.LimitChoices) _limPills.Children.Add(Pill("lim", g == 0 ? "No limit" : $"{g:0} GB", g));
+        _limPills.Children.Add(Pill("lim", "Custom", -1.0));
+        col.Children.Add(_limPills);
+        col.Children.Add(_customGBBox);
+
+        _overRow.Children.Add(Label("When over the limit"));
+        _overPills.Children.Add(Pill("over", "Warn me", "warn"));
+        _overPills.Children.Add(Pill("over", "Move oldest to Recycle Bin", "trash"));
+        _overRow.Children.Add(_overPills);
+        col.Children.Add(_overRow);
+
+        col.Children.Add(Label("Remind me now and then to empty the Recycle Bin"));
+        _remindPills.Children.Add(Pill("remind", "On", true));
+        _remindPills.Children.Add(Pill("remind", "Off", false));
+        col.Children.Add(_remindPills);
+
+        _usageText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        _usageBar.SetResourceReference(StyleProperty, "ThinProgress");
+        col.Children.Add(_usageText);
+        col.Children.Add(_usageBar);
+        var note = new TextBlock { Text = "Only files Lan-Line received are ever moved, and only to the Recycle Bin, so you can still get them back.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
+        note.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(note);
+        _setError.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
+        col.Children.Add(_setError);
+
+        var open = new Button { Content = "Open folder" };
+        var clean = new Button { Content = "Clean up now", ToolTip = "Saves these settings and applies them now" };
+        foreach (var b in new[] { open, clean }) b.SetResourceReference(StyleProperty, "SecondaryButton");
+        open.Click += (_, _) => { Directory.CreateDirectory(DownloadsPath); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(DownloadsPath) { UseShellExecute = true }); };
+        clean.Click += (_, _) => { if (BuildSettings() is { } s) { SaveSettings(s); RunCleanup(manual: true); } };
+        var save = new Button { Content = "Save", Width = 88, IsDefault = true };
+        save.SetResourceReference(StyleProperty, "PrimaryButton");
+        save.Click += (_, _) => { if (BuildSettings() is { } s) SaveSettings(s); };
+        _setCancel.SetResourceReference(StyleProperty, "LinkButton");
+        _setCancel.VerticalAlignment = VerticalAlignment.Center;
+        _setCancel.Click += (_, _) => CloseSettings();
+        var buttons = new DockPanel { Margin = new Thickness(0, 16, 0, 0), LastChildFill = false };
+        DockPanel.SetDock(save, Dock.Right); DockPanel.SetDock(_setCancel, Dock.Right);
+        buttons.Children.Add(open); buttons.Children.Add(clean); buttons.Children.Add(save); buttons.Children.Add(_setCancel);
+        col.Children.Add(buttons);
+
+        foreach (var w in new[] { _retPills, _limPills }) foreach (RadioButton r in w.Children) r.Checked += (_, _) => RefreshCustomBoxes();
+        return new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col };
+    }
+
+    static TextBlock Label(string text)
+    {
+        var t = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 6) };
+        t.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        return t;
+    }
+
+    static RadioButton Pill(string group, string text, object value)
+    {
+        var r = new RadioButton { Content = text, GroupName = group, Tag = value };
+        r.SetResourceReference(StyleProperty, "Pill");
+        Automation(r, text);
+        return r;
+    }
+
+    static Border NumberBox(TextBox box, string unit, string label)
+    {
+        box.SetResourceReference(StyleProperty, "InputBox");
+        box.Width = 70; box.FontSize = 13; box.VerticalAlignment = VerticalAlignment.Center;
+        Automation(box, label);
+        var u = new TextBlock { Text = unit, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+        u.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.Add(box); sp.Children.Add(u);
+        var b = new Border { CornerRadius = new CornerRadius(7), BorderThickness = new Thickness(1), Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Child = sp, Margin = new Thickness(0, 2, 0, 0) };
+        b.SetResourceReference(Border.BackgroundProperty, "InputFill");
+        b.SetResourceReference(Border.BorderBrushProperty, "InputStroke");
+        return b;
+    }
+
+    static void Select(WrapPanel w, Func<object?, bool> match)
+    {
+        foreach (RadioButton r in w.Children) r.IsChecked = match(r.Tag);
+    }
+
+    static object? Selected(WrapPanel w) => w.Children.OfType<RadioButton>().FirstOrDefault(r => r.IsChecked == true)?.Tag;
+
+    void LoadSettingsIntoPanel()
+    {
+        var s = _storage;
+        var retKnown = StorageSettings.RetentionChoices.Contains(s.RetentionDays);
+        Select(_retPills, t => retKnown ? (t is int i && i == s.RetentionDays) : (t is int j && j == -1));
+        _customDays.Text = retKnown ? "" : s.RetentionDays.ToString();
+        var limKnown = StorageSettings.LimitChoices.Contains(s.LimitGB);
+        Select(_limPills, t => limKnown ? (t is double d && d == s.LimitGB) : (t is double e && e == -1));
+        _customGB.Text = limKnown ? "" : s.LimitGB.ToString("0.##");
+        Select(_overPills, t => (string?)t == s.OverLimit);
+        Select(_remindPills, t => t is bool b && b == s.TrashReminder);
+        _setFirstRun.Visibility = _settingsFirstRun ? Visibility.Visible : Visibility.Collapsed;
+        _setCancel.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
+        _setError.Visibility = Visibility.Collapsed;
+        RefreshCustomBoxes();
+    }
+
+    void RefreshCustomBoxes()
+    {
+        _customDaysBox.Visibility = Selected(_retPills) is int i && i == -1 ? Visibility.Visible : Visibility.Collapsed;
+        _customGBBox.Visibility = Selected(_limPills) is double d && d == -1 ? Visibility.Visible : Visibility.Collapsed;
+        _overRow.Visibility = Selected(_limPills) is double z && z == 0 ? Visibility.Collapsed : Visibility.Visible;
+        RefreshUsageBar();
+    }
+
+    void RefreshUsageBar()
+    {
+        var gb = Selected(_limPills) is double d ? (d == -1 ? (double.TryParse(_customGB.Text, out var c) ? c : 0) : d) : _storage.LimitGB;
+        var limit = gb > 0 ? (long)(gb * 1e9) : 0;
+        _usageText.Text = limit > 0 ? $"Received files use {Cleanup.FormatBytes(_usageBytes)} of {Cleanup.FormatBytes(limit)}"
+                                    : $"Received files use {Cleanup.FormatBytes(_usageBytes)}";
+        _usageBar.Visibility = limit > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var frac = limit > 0 ? Math.Min(1, (double)_usageBytes / limit) : 0;
+        _usageBar.Value = frac;
+        if (frac >= 1) _usageBar.SetResourceReference(ForegroundProperty, "Danger");
+        else if (frac >= 0.8) _usageBar.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xB0, 0x33));
+        else _usageBar.SetResourceReference(ForegroundProperty, "Accent");
+    }
+
+    /// <summary>The settings as chosen, or null (with an error shown) when a custom number isn't valid.</summary>
+    StorageSettings? BuildSettings()
+    {
+        var s = _storage.Copy();
+        if (Selected(_retPills) is int r)
+        {
+            if (r == -1)
+            {
+                if (!int.TryParse(_customDays.Text.Trim(), out var d) || d < 1 || d > 3650) return Fail("Days to keep files must be a whole number from 1 to 3650.");
+                s.RetentionDays = d;
+            }
+            else s.RetentionDays = r;
+        }
+        if (Selected(_limPills) is double g)
+        {
+            if (g == -1)
+            {
+                if (!double.TryParse(_customGB.Text.Trim(), out var c) || c < 0.1 || c > 100_000) return Fail("The storage limit must be a number of GB from 0.1 to 100000.");
+                s.LimitGB = c;
+            }
+            else s.LimitGB = g;
+        }
+        if (Selected(_overPills) is string o) s.OverLimit = o;
+        if (Selected(_remindPills) is bool b) s.TrashReminder = b;
+        s.Confirmed = true;
+        _setError.Visibility = Visibility.Collapsed;
+        return s;
+
+        StorageSettings? Fail(string msg) { _setError.Text = msg; _setError.Visibility = Visibility.Visible; return null; }
+    }
+
+    void SaveSettings(StorageSettings s)
+    {
+        _storage = s;
+        try { s.Save(SettingsPath); } catch (Exception e) { Note($"Couldn't save settings: {e.Message}"); }
+        _settingsFirstRun = false;
+        CloseSettings();
+        RunCleanup(manual: false);
+    }
+
+    /// <summary>--demo-settings first|normal: the settings panel with sample usage (screenshots).</summary>
+    internal void DemoSettings(bool firstRun)
+    {
+        _storage = new StorageSettings();
+        if (!firstRun) { _storage.RetentionDays = 30; _storage.OverLimit = "trash"; _storage.Confirmed = true; }
+        _settingsFirstRun = firstRun;
+        LoadSettingsIntoPanel();
+        _usageBytes = 8_400_000_000;
+        RefreshUsageBar();
+        _showingSettings = true;
+        Height = 600;
+        ApplyScreen();
+    }
+}
+
+/// <summary>Moves a file to the Recycle Bin (recoverable), without any dialog.</summary>
+static class RecycleBin
+{
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct SHFILEOPSTRUCT
+    {
+        public IntPtr hwnd; public uint wFunc; public string pFrom; public string? pTo; public ushort fFlags;
+        public int fAnyOperationsAborted; public IntPtr hNameMappings; public string? lpszProgressTitle;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHFileOperation(ref SHFILEOPSTRUCT op);
+
+    public static bool Send(string path)
+    {
+        const uint FO_DELETE = 3;
+        const ushort FOF_SILENT = 0x4, FOF_NOCONFIRMATION = 0x10, FOF_ALLOWUNDO = 0x40, FOF_NOERRORUI = 0x400;
+        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = path + "\0", fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI };
+        return SHFileOperation(ref op) == 0 && op.fAnyOperationsAborted == 0 && !File.Exists(path);
+    }
+}

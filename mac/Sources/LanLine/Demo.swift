@@ -20,6 +20,16 @@ enum Demo {
         }
     }
 
+    /// `--demo-settings first|normal`: the storage settings screen with sample usage.
+    static func settings(_ m: AppModel, firstRun: Bool) {
+        fill(m)
+        m.storage = StorageSettings()
+        if !firstRun { m.storage.retentionDays = 30; m.storage.overLimit = "trash"; m.storage.confirmed = true }
+        m.usageBytes = 8_400_000_000
+        m.settingsFirstRun = firstRun
+        m.showingSettings = true
+    }
+
     static func fill(_ m: AppModel, empty: Bool = false) {
         m.connected = true
         m.peer = "Studio PC"

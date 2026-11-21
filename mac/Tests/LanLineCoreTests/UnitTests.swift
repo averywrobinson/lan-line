@@ -95,3 +95,61 @@ final class PairingTests: XCTestCase {
         XCTAssertFalse(LanLineConfig(token: "t").connects)
     }
 }
+
+final class StorageTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    func file(_ name: String, daysAgo: Double, gb: Double) -> ReceivedFile {
+        ReceivedFile(path: "/x/\(name)", size: Int64(gb * 1_000_000_000), receivedAt: now.addingTimeInterval(-daysAgo * 86_400))
+    }
+
+    func testDefaultsDeleteNothingAndWarnAt80Percent() {
+        let s = StorageSettings()
+        XCTAssertEqual(s.retentionDays, 0); XCTAssertEqual(s.limitGB, 10); XCTAssertEqual(s.overLimit, "warn"); XCTAssertFalse(s.confirmed)
+        let p = Cleanup.plan([file("a", daysAgo: 400, gb: 5), file("b", daysAgo: 1, gb: 3.5)], settings: s, now: now)
+        XCTAssertTrue(p.toTrash.isEmpty)
+        XCTAssertEqual(p.level, 1)   // 8.5 of 10 GB
+        let over = Cleanup.plan([file("a", daysAgo: 2, gb: 7), file("b", daysAgo: 1, gb: 4)], settings: s, now: now)
+        XCTAssertTrue(over.toTrash.isEmpty); XCTAssertEqual(over.level, 2)
+    }
+
+    func testRetentionMovesOnlyOldFiles() {
+        var s = StorageSettings(); s.retentionDays = 30; s.limitGB = 0
+        let p = Cleanup.plan([file("old", daysAgo: 31, gb: 1), file("edge", daysAgo: 30, gb: 1), file("new", daysAgo: 29, gb: 1)], settings: s, now: now)
+        XCTAssertEqual(p.expired.map(\.path), ["/x/old", "/x/edge"])
+        XCTAssertEqual(p.level, 0)
+    }
+
+    func testTrashModeMovesOldestUntilUnderLimitButKeepsNewest() {
+        var s = StorageSettings(); s.limitGB = 10; s.overLimit = "trash"
+        let p = Cleanup.plan([file("c", daysAgo: 1, gb: 4), file("a", daysAgo: 3, gb: 4), file("b", daysAgo: 2, gb: 4)], settings: s, now: now)
+        XCTAssertEqual(p.overLimit.map(\.path), ["/x/a"])
+        XCTAssertEqual(p.usageBytes, 8_000_000_000); XCTAssertEqual(p.level, 1)
+        let huge = Cleanup.plan([file("big", daysAgo: 0, gb: 30)], settings: s, now: now)
+        XCTAssertTrue(huge.overLimit.isEmpty); XCTAssertEqual(huge.level, 2)
+    }
+
+    func testQuietWarnings() {
+        var s = StorageSettings()
+        XCTAssertTrue(Cleanup.shouldWarnLimit(s, level: 1, now: now))
+        XCTAssertFalse(Cleanup.shouldWarnLimit(s, level: 0, now: now))
+        s.lastLimitWarning = now.addingTimeInterval(-3_600)
+        XCTAssertFalse(Cleanup.shouldWarnLimit(s, level: 2, now: now))
+        XCTAssertTrue(Cleanup.shouldRemindTrash(s, movedSomething: true, now: now))
+        XCTAssertFalse(Cleanup.shouldRemindTrash(s, movedSomething: false, now: now))
+        s.lastTrashReminder = now.addingTimeInterval(-13 * 86_400)
+        XCTAssertFalse(Cleanup.shouldRemindTrash(s, movedSomething: true, now: now))
+        s.lastTrashReminder = nil; s.trashReminder = false
+        XCTAssertFalse(Cleanup.shouldRemindTrash(s, movedSomething: true, now: now))
+    }
+
+    func testSettingsAndLogRoundTrip() throws {
+        let d = tempDir("store")
+        var s = StorageSettings(); s.retentionDays = 60; s.confirmed = true; s.lastTrashReminder = now
+        try s.save(to: d.appendingPathComponent("settings.json"))
+        XCTAssertEqual(StorageSettings.load(from: d.appendingPathComponent("settings.json")), s)
+        XCTAssertEqual(StorageSettings.load(from: d.appendingPathComponent("missing.json")), StorageSettings())
+        let files = [file("a", daysAgo: 1, gb: 1)]
+        try ReceivedLog.save(files, to: d.appendingPathComponent("received.json"))
+        XCTAssertEqual(ReceivedLog.load(from: d.appendingPathComponent("received.json")), files)
+    }
+}

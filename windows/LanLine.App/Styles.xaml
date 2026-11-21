@@ -131,6 +131,52 @@
         </Setter>
     </Style>
 
+    <!-- settings: one choice in a row of pills (RadioButton) -->
+    <Style x:Key="Pill" TargetType="RadioButton">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Margin" Value="0,0,6,6"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="bg" Background="{DynamicResource CardFill}" BorderBrush="{DynamicResource CardStroke}" BorderThickness="1" CornerRadius="12" Padding="11,4">
+                        <ContentPresenter x:Name="cp" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="bg" Property="Background" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="bg" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="bg" Property="BorderThickness" Value="2"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- settings: quiet secondary buttons (Open folder, Clean up now) -->
+    <Style x:Key="SecondaryButton" TargetType="Button">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Margin" Value="0,0,8,0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bg" Background="{DynamicResource CardFill}" BorderBrush="{DynamicResource CardStroke}" BorderThickness="1" CornerRadius="7" Padding="11,5">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- round send button -->
     <Style x:Key="SendButton" TargetType="Button">
         <Setter Property="Width" Value="28"/>
@@ -195,6 +241,7 @@
 
     <!-- thin progress bar in file cards -->
     <Style x:Key="ThinProgress" TargetType="ProgressBar">
+        <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
         <Setter Property="Height" Value="3"/>
         <Setter Property="Minimum" Value="0"/>
         <Setter Property="Maximum" Value="1"/>
@@ -203,7 +250,7 @@
                 <ControlTemplate TargetType="ProgressBar">
                     <Grid>
                         <Border x:Name="PART_Track" CornerRadius="1.5" Background="{DynamicResource Hairline}"/>
-                        <Border x:Name="PART_Indicator" CornerRadius="1.5" Background="{DynamicResource Accent}" HorizontalAlignment="Left"/>
+                        <Border x:Name="PART_Indicator" CornerRadius="1.5" Background="{TemplateBinding Foreground}" HorizontalAlignment="Left"/>
                     </Grid>
                 </ControlTemplate>
             </Setter.Value>

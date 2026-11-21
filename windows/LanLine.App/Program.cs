@@ -34,9 +34,11 @@ static class Program
         app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/Lan-Line;component/Styles.xaml") });
         Theme.Apply(app.Resources);
         var demoPair = Arg(args, "--demo-pair");
-        var demo = args.Contains("--demo") || demoPair != null;
+        var demoSettings = Arg(args, "--demo-settings");
+        var demo = args.Contains("--demo") || demoPair != null || demoSettings != null;
         var w = new MainWindow(args, demo);
-        if (demoPair != null) w.DemoPair(demoPair);
+        if (demoSettings != null) { Demo.Fill(w, empty: false); w.DemoSettings(demoSettings == "first"); }
+        else if (demoPair != null) w.DemoPair(demoPair);
         else if (demo) Demo.Fill(w, empty: args.Contains("--empty"));
         if (snapshot != null)
         {

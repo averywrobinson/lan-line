@@ -12,7 +12,9 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Header(model: model)
             Rectangle().fill(p.hairline).frame(height: 1)
-            if model.pairing {
+            if model.showingSettings {
+                SettingsView(model: model)
+            } else if model.pairing {
                 PairingView(model: model)
             } else {
                 FeedView(model: model)
@@ -20,7 +22,7 @@ struct ContentView: View {
             }
         }
         .background(Background(glass: model.glass))
-        .overlay { if model.dropTargeted && !model.pairing { DropOverlay(peer: model.peerLabel) } }
+        .overlay { if model.dropTargeted && !model.pairing && !model.showingSettings { DropOverlay(peer: model.peerLabel) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $model.dropTargeted) { providers in
             for prov in providers {
                 _ = prov.loadObject(ofClass: URL.self) { url, _ in
@@ -258,24 +260,27 @@ private struct FileCard: View {
     let model: AppModel
     @Environment(\.colorScheme) private var scheme
 
+    private var removed: Bool { model.removedPaths.contains(url.path) }
+
     var body: some View {
         let p = Palette.of(scheme)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 11) {
                 FileIcon(url: url)
+                    .opacity(removed ? 0.45 : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(p.text)
                         .lineLimit(1).truncationMode(.middle)
-                    Text(ByteCountFormatter.string(fromByteCount: max(size, 0), countStyle: .file))
+                    Text(removed ? "Moved to Trash" : ByteCountFormatter.string(fromByteCount: max(size, 0), countStyle: .file))
                         .font(.system(size: 11))
                         .foregroundStyle(p.textSecondary)
                 }
                 .frame(minWidth: 90, alignment: .leading)
                 Spacer(minLength: 4)
                 VStack(spacing: 4) {
-                    CopyButton { Clip.copy(file: url) }
+                    if !removed { CopyButton { Clip.copy(file: url) } }
                     if !item.incoming { StateMark(state: item.state) }
                 }
             }
@@ -292,8 +297,8 @@ private struct FileCard: View {
                 .shadow(color: p.shadow, radius: scheme == .dark ? 6 : 3, y: 2)
         )
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
-        .onDrag { model.chipDragAt = Date(); return NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+        .onTapGesture(count: 2) { if !removed { NSWorkspace.shared.open(url) } }
+        .onDrag { model.chipDragAt = Date(); return removed ? NSItemProvider() : (NSItemProvider(contentsOf: url) ?? NSItemProvider()) }
         .contextMenu {
             Button("Open") { NSWorkspace.shared.open(url) }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }

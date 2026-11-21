@@ -18,6 +18,10 @@ sealed class ItemRow
     public string? Path => _item.Path;
     readonly TextBlock _mark = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
     readonly ProgressBar? _progress;
+    TextBlock? _sizeText;
+    FrameworkElement? _icon;
+    Button? _copyButton;
+    bool _removed;
     Item _item;
 
     public ItemRow(Item item, MainWindow owner)
@@ -29,6 +33,7 @@ sealed class ItemRow
         copy.SetResourceReference(FrameworkElement.StyleProperty, "IconButton");
         MainWindow.Automation(copy, "Copy");
         copy.Click += (_, _) => { Copy(); Flash(copy); };
+        _copyButton = copy;
 
         Border bubble;
         if (!item.IsFile)
@@ -50,7 +55,7 @@ sealed class ItemRow
         {
             var name = new TextBlock { Text = item.FileName, FontSize = 13, FontWeight = FontWeights.Medium, TextTrimming = TextTrimming.CharacterEllipsis };
             name.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-            var size = new TextBlock { Text = FormatSize(item.Size), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
+            var size = _sizeText = new TextBlock { Text = FormatSize(item.Size), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
             size.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
             var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(11, 0, 8, 0), MinWidth = 90 };
             names.Children.Add(name);
@@ -59,7 +64,7 @@ sealed class ItemRow
             side.Children.Add(copy);
             if (!item.Incoming) side.Children.Add(_mark);
             var row = new DockPanel();
-            var icon = FileIcon(item.Path);
+            var icon = _icon = FileIcon(item.Path);
             DockPanel.SetDock(icon, Dock.Left);
             DockPanel.SetDock(side, Dock.Right);
             row.Children.Add(icon);
@@ -77,12 +82,12 @@ sealed class ItemRow
             Point? down = null;
             bubble.MouseLeftButtonDown += (_, e) =>
             {
-                if (e.ClickCount == 2) { Open(); return; }
+                if (e.ClickCount == 2) { if (!_removed) Open(); return; }
                 down = e.GetPosition(bubble);
             };
             bubble.MouseMove += (_, e) =>
             {
-                if (down is not { } d || e.LeftButton != MouseButtonState.Pressed || _item.Path is not { } p) return;
+                if (_removed || down is not { } d || e.LeftButton != MouseButtonState.Pressed || _item.Path is not { } p) return;
                 var now = e.GetPosition(bubble);
                 if (Math.Abs(now.X - d.X) < 4 && Math.Abs(now.Y - d.Y) < 4) return;
                 down = null;
@@ -99,6 +104,19 @@ sealed class ItemRow
         bubble.Tag = item.Id;
         View = bubble;
         Update(item);
+    }
+
+    /// <summary>The storage cleanup moved this file to the Recycle Bin: say so and stop offering open/drag/copy.</summary>
+    public void MarkRemoved()
+    {
+        if (_removed || _sizeText == null) return;
+        _removed = true;
+        _sizeText.Text = "Moved to Recycle Bin";
+        if (_icon != null) _icon.Opacity = 0.45;
+        if (_copyButton != null) _copyButton.Visibility = Visibility.Collapsed;
+        View.ToolTip = null;
+        View.Cursor = null;
+        View.ContextMenu = null;
     }
 
     public void Update(Item item)

@@ -26,6 +26,13 @@ final class AppModel {
     /// Translucent window (off for snapshots, which can't capture the blur).
     var glass = false
 
+    // storage settings (shown over everything until the user has saved them once)
+    var showingSettings = false
+    var settingsFirstRun = false
+    var storage = StorageSettings()
+    var usageBytes: Int64 = 0
+    var removedPaths: Set<String> = []
+
     // pairing
     var pairing = false
     var pairMode: PairMode = .show
@@ -44,6 +51,7 @@ final class AppModel {
     @ObservationIgnored var onPopUp: () -> Void = {}
     @ObservationIgnored var onPin: (Bool) -> Void = { _ in }
     @ObservationIgnored var pairActions = PairActions()
+    @ObservationIgnored var settingsActions = SettingsActions()
     private let maxRows = 200
 
     var peerLabel: String { peer.isEmpty ? "your other computer" : peer }
@@ -143,6 +151,15 @@ struct PairActions {
     var switchMode: (PairMode) -> Void = { _ in }
     var search: () -> Void = {}
     var connect: () -> Void = {}
+    var cancel: () -> Void = {}
+}
+
+/// What the settings screen can ask the controller to do.
+@MainActor
+struct SettingsActions {
+    var save: (StorageSettings) -> Void = { _ in }
+    var cleanNow: () -> Void = {}
+    var openFolder: () -> Void = {}
     var cancel: () -> Void = {}
 }
 

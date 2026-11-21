@@ -33,7 +33,7 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("queue drained after reconnect", T.QueueAfterReconnect), ("drop mid-file resends", T.DropMidFile),
     ("new peer replaces old", T.NewPeerReplaces), ("pair codes", T.PairCodes),
     ("discovery reply round trip", T.DiscoveryReply), ("discovery over loopback", T.DiscoveryLoopback),
-    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey),
+    ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey), ("storage cleanup rules", T.StorageRules),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -439,6 +439,42 @@ static class T
         using (var c = await RawClient.Connect(port)) { var ok = await c.Hello(newTok); H.True(ok is { Type: "hello_ok", Rekey: null }, $"new secret accepted, got {ok}"); }
         using (var c = await RawClient.Connect(port)) { var ok = await c.Hello("ABCDE12345"); H.True(ok is { Type: "hello_ok" }, $"code still accepted, got {ok}"); }
         using (var c = await RawClient.Connect(port)) { var bad = await c.Hello("ZZZZZ99999"); H.True(bad is not { Type: "hello_ok" }, $"wrong code refused, got {bad}"); }
+    }
+
+    public static Task StorageRules()
+    {
+        var now = new DateTime(2033, 5, 18, 12, 0, 0, DateTimeKind.Utc);
+        ReceivedFile F(string n, double daysAgo, double gb) => new("/x/" + n, (long)(gb * 1e9), now.AddDays(-daysAgo));
+        var s = new StorageSettings();
+        H.True(s.RetentionDays == 0 && s.LimitGB == 10 && s.OverLimit == "warn" && !s.Confirmed, "defaults");
+        var p = Cleanup.Plan([F("a", 400, 5), F("b", 1, 3.5)], s, now);
+        H.True(!p.ToTrash.Any() && p.Level == 1, "defaults delete nothing, warn at 80 %");
+        H.Eq(2, Cleanup.Plan([F("a", 2, 7), F("b", 1, 4)], s, now).Level, "over limit");
+        var r = new StorageSettings { RetentionDays = 30, LimitGB = 0 };
+        H.Eq("/x/old,/x/edge", string.Join(",", Cleanup.Plan([F("old", 31, 1), F("edge", 30, 1), F("new", 29, 1)], r, now).Expired.Select(f => f.Path)), "retention");
+        var t = new StorageSettings { LimitGB = 10, OverLimit = "trash" };
+        var tp = Cleanup.Plan([F("c", 1, 4), F("a", 3, 4), F("b", 2, 4)], t, now);
+        H.Eq("/x/a", string.Join(",", tp.OverLimit.Select(f => f.Path)), "oldest moved first");
+        H.Eq(8_000_000_000L, tp.UsageBytes, "usage after"); H.Eq(1, tp.Level, "level after");
+        var huge = Cleanup.Plan([F("big", 0, 30)], t, now);
+        H.True(!huge.OverLimit.Any() && huge.Level == 2, "newest file never moved");
+        H.True(Cleanup.ShouldWarnLimit(s, 1, now) && !Cleanup.ShouldWarnLimit(s, 0, now), "warn when level > 0");
+        s.LastLimitWarning = now.AddHours(-1);
+        H.True(!Cleanup.ShouldWarnLimit(s, 2, now), "at most once a day");
+        H.True(Cleanup.ShouldRemindTrash(s, true, now) && !Cleanup.ShouldRemindTrash(s, false, now), "trash reminder only after a move");
+        s.LastTrashReminder = now.AddDays(-13);
+        H.True(!Cleanup.ShouldRemindTrash(s, true, now), "every 14 days at most");
+        s.LastTrashReminder = null; s.TrashReminder = false;
+        H.True(!Cleanup.ShouldRemindTrash(s, true, now), "reminder can be turned off");
+        var dir = H.TempDir("store");
+        var ss = new StorageSettings { RetentionDays = 60, Confirmed = true, LastTrashReminder = now };
+        ss.Save(Path.Combine(dir, "settings.json"));
+        var back = StorageSettings.Load(Path.Combine(dir, "settings.json"));
+        H.True(back.RetentionDays == 60 && back.Confirmed && back.LastTrashReminder == now, "settings round trip");
+        H.True(!StorageSettings.Load(Path.Combine(dir, "missing.json")).Confirmed, "missing settings = defaults");
+        ReceivedLog.Save([F("a", 1, 1)], Path.Combine(dir, "received.json"));
+        H.Eq(F("a", 1, 1), ReceivedLog.Load(Path.Combine(dir, "received.json")).Single(), "log round trip");
+        return Task.CompletedTask;
     }
 
     public static async Task DeadLink()

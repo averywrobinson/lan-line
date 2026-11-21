@@ -157,6 +157,9 @@ sealed partial class MainWindow : Window
         var center = new Grid();
         center.Children.Add(body);
         center.Children.Add(_pairPanel);   // shown instead of the feed and composer while pairing
+        _settingsPanel = BuildSettingsPanel();
+        _settingsPanel.Visibility = Visibility.Collapsed;
+        center.Children.Add(_settingsPanel);   // shown over both until storage settings are saved once
         root.Children.Add(center);
         var layers = new Grid();
         layers.Children.Add(root);
@@ -286,7 +289,11 @@ sealed partial class MainWindow : Window
             case SessionEvent.Connected c: _connected = true; _peer = c.Peer; Paired(c.Peer); break;
             case SessionEvent.Disconnected: _connected = false; _statusText = "Reconnecting…"; break;
             case SessionEvent.Status s: if (!_connected) _statusText = s.Text.StartsWith("dialing") ? $"Connecting to {Away}…" : $"Can't reach {Away}"; break;
-            case SessionEvent.Received r: Upsert(r.Item); PopUp(); break;
+            case SessionEvent.Received r:
+                Upsert(r.Item);
+                if (r.Item.IsFile && r.Item.Path is { } rp) LogReceived(rp, r.Item.Size);
+                PopUp();
+                break;
             case SessionEvent.Outgoing o: Upsert(o.Item); break;
             case SessionEvent.ReceiveFailed f: Note($"Couldn't receive {f.Name}: {f.Reason}"); PopUp(); break;
             case SessionEvent.Error err: if (!_pairing) Note(err.Message); break;

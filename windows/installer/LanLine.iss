@@ -4,7 +4,7 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.2"
+#define AppVersionFull "0.9.0-beta.3"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif
@@ -53,6 +53,12 @@ Name: "desktopicon"; Description: "Add a desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; Leftovers from 0.9.0-beta.1, which shipped the core library under its old name. [Files] only adds and
+; replaces, so an upgrade would otherwise keep these next to LanLine.Core.dll.
+Type: files; Name: "{app}\Ferry.Core.dll"
+Type: files; Name: "{app}\Ferry.Core.pdb"
 
 [Icons]
 Name: "{userprograms}\Lan-Line"; Filename: "{app}\Lan-Line.exe"

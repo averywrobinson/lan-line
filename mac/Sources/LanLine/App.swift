@@ -20,13 +20,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildMenu()
         model.glass = options.value("--snapshot") == nil && !options.flag("--no-glass")
         buildPanel()
-        if let m = options.value("--demo-pair") { Demo.pair(model, mode: m) }
+        if let m = options.value("--demo-settings") { Demo.settings(model, firstRun: m == "first") }
+        else if let m = options.value("--demo-pair") { Demo.pair(model, mode: m) }
         else if options.flag("--demo") { Demo.fill(model, empty: options.flag("--empty")) } else { boot() }
         if let out = options.value("--snapshot") { snapshot(to: out) }
     }
 
     /// `--snapshot PATH`: render the window (off-screen) to a PNG and quit. For design checks in both themes.
     private func snapshot(to path: String) {
+        if let sz = options.value("--snapshot-size")?.split(separator: "x"), sz.count == 2, let w = Double(sz[0]), let h = Double(sz[1]) {
+            panel.setContentSize(NSSize(width: w, height: h))
+        }
         panel.setFrameOrigin(NSPoint(x: -4000, y: -4000))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [panel] in
             guard let panel, let frameView = panel.contentView?.superview else { exit(1) }
@@ -55,6 +59,112 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private var port: UInt16 { options.value("--port").flatMap(UInt16.init) ?? config?.port ?? LanLineConfig.defaultPort }
 
+    // MARK: storage (received-file cleanup)
+
+    private var settingsURL: URL { options.configURL.deletingLastPathComponent().appendingPathComponent("settings.json") }
+    private var logURL: URL { options.configURL.deletingLastPathComponent().appendingPathComponent("received.json") }
+    private var cleanupTimer: Timer?
+
+    private func setUpStorage() {
+        model.storage = StorageSettings.load(from: settingsURL)
+        model.settingsActions = SettingsActions(
+            save: { [weak self] s in self?.saveSettings(s) },
+            cleanNow: { [weak self] in self?.runCleanup(manual: true) },
+            openFolder: { [weak self] in
+                guard let self else { return }
+                let dir = self.options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                NSWorkspace.shared.open(dir)
+            },
+            cancel: { [weak self] in self?.model.showingSettings = false })
+        runCleanup(manual: false)
+        let t = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.runCleanup(manual: false) } }
+        RunLoop.main.add(t, forMode: .common)
+        cleanupTimer = t
+        if !model.storage.confirmed { showSettings(firstRun: true) }   // every launch until saved once
+    }
+
+    private func showSettings(firstRun: Bool = false) {
+        model.settingsFirstRun = firstRun
+        refreshUsage()
+        model.showingSettings = true
+        growPanel(to: 470)
+    }
+
+    private func saveSettings(_ s: StorageSettings) {
+        var n = s
+        n.lastTrashReminder = model.storage.lastTrashReminder
+        n.lastLimitWarning = model.storage.lastLimitWarning
+        model.storage = n
+        do { try n.save(to: settingsURL) } catch { model.note("Couldn't save settings: \(error.localizedDescription)") }
+        model.showingSettings = false
+        model.settingsFirstRun = false
+        runCleanup(manual: false)
+    }
+
+    private func logReceived(_ url: URL, size: Int64) {
+        var log = ReceivedLog.load(from: logURL)
+        log.removeAll { $0.path == url.path }
+        log.append(ReceivedFile(path: url.path, size: size, receivedAt: Date()))
+        try? ReceivedLog.save(log, to: logURL)
+        runCleanup(manual: false)
+    }
+
+    private func refreshUsage() {
+        let existing = ReceivedLog.load(from: logURL).filter { FileManager.default.fileExists(atPath: $0.path) }
+        model.usageBytes = existing.reduce(0) { $0 + $1.size }
+    }
+
+    /// Move expired / over-limit received files to the Trash, then say so quietly. Never deletes anything else.
+    private func runCleanup(manual: Bool) {
+        let fm = FileManager.default
+        let log = ReceivedLog.load(from: logURL)
+        let existing = log.filter { fm.fileExists(atPath: $0.path) }
+        let now = Date()
+        var s = model.storage
+        let plan = Cleanup.plan(existing, settings: s, now: now)
+        var moved: [ReceivedFile] = []
+        for f in plan.toTrash {
+            do { try fm.trashItem(at: URL(fileURLWithPath: f.path), resultingItemURL: nil); moved.append(f) }
+            catch { DebugLog.write("trash failed \(f.path): \(error)") }
+        }
+        let movedPaths = Set(moved.map(\.path))
+        let kept = existing.filter { !movedPaths.contains($0.path) }
+        if kept.count != log.count { try? ReceivedLog.save(kept, to: logURL) }
+        model.removedPaths.formUnion(movedPaths)
+        model.usageBytes = kept.reduce(0) { $0 + $1.size }
+        var changed = false
+        if !moved.isEmpty {
+            let size = Cleanup.formatBytes(moved.reduce(0) { $0 + $1.size })
+            let why = plan.expired.isEmpty ? "to stay under your \(Cleanup.formatBytes(plan.limitBytes)) limit"
+                                           : "older than \(s.retentionDays) day\(s.retentionDays == 1 ? "" : "s")"
+            model.note("Moved \(moved.count) received file\(moved.count == 1 ? "" : "s") (\(size)) to the Trash, \(why).")
+            if Cleanup.shouldRemindTrash(s, movedSomething: true, now: now) {
+                model.note("Old received files go to the Trash. Empty it once you've had a look. (Turn this reminder off in Settings.)")
+                s.lastTrashReminder = now; changed = true
+            }
+        } else if manual {
+            model.note("Nothing to clean up. Received files use \(Cleanup.formatBytes(plan.usageBytes)).")
+        }
+        if Cleanup.shouldWarnLimit(s, level: plan.level, now: now) || (manual && plan.level > 0) {
+            let used = Cleanup.formatBytes(plan.usageBytes), lim = Cleanup.formatBytes(plan.limitBytes)
+            model.note(plan.level == 2
+                ? "Received files use \(used), over your \(lim) limit. Raise it or turn on cleanup in Settings (⌘,)."
+                : "Received files use \(used) of your \(lim) limit.")
+            s.lastLimitWarning = now; changed = true
+        }
+        if changed { model.storage = s; try? s.save(to: settingsURL) }
+    }
+
+    /// Make the window tall enough for a settings or pairing screen.
+    private func growPanel(to h: CGFloat) {
+        guard let panel, panel.frame.height < h else { return }
+        var f = panel.frame; f.origin.y -= h - f.height; f.size.height = h
+        panel.setFrame(f, display: true, animate: true)
+    }
+
+    @objc private func settingsFromMenu() { showPanel(activate: true); showSettings() }
+
     private func boot() {
         DebugLog.path = options.value("--debug-log")
         model.myName = options.name
@@ -66,6 +176,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let c = try? LanLineConfig.load(from: options.configURL) { run(c) }
         else if options.value("--connect") != nil { run(options.loadConfig()) }   // flags win; loadConfig explains a bad path
         else { beginPairing(.show) }
+        setUpStorage()
     }
 
     /// Normal operation with a saved pairing.
@@ -101,6 +212,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var debugPasteDone = false
 
     private func event(_ e: SessionEvent) {
+        if case .received(let item) = e, case .file(_, let size, let url) = item.kind { logReceived(url, size: size) }
         if case .rekeyed(let t) = e {   // the pairing code was swapped for a long-term secret
             if var p = pending { p.token = t; pending = p }
             else if var c = config { c.token = t; save(c); config = c }
@@ -163,9 +275,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.pairBusy = false
         model.canCancelPairing = config != nil
         model.peer = ""
-        if panel.frame.height < 430 {   // the pairing screen needs a little more room than the feed
-            var f = panel.frame; f.origin.y -= 430 - f.height; f.size.height = 430; panel.setFrame(f, display: true, animate: true)
-        }
+        growPanel(to: 430)   // the pairing screen needs a little more room than the feed
         switch mode {
         case .show:
             let code = PairCode.generate()
@@ -316,6 +426,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Lan-Line", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Settings…", action: #selector(settingsFromMenu), keyEquivalent: ",")
         appMenu.addItem(withTitle: "Pair with Another Computer…", action: #selector(pairFromMenu), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Lan-Line", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
