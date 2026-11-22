@@ -35,8 +35,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>com.avery.lan-line.stage</string>
+    <key>CFBundleURLSchemes</key><array><string>lanline</string></array>
+  </dict></array>
 </dict></plist>
 PLIST
+# The Share extension (Finder → Share → Lan-Line), signed before the app that contains it.
+ShareExtension/build-appex.sh "$PWD/$APP" "$FULL" "$BUILD"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q '"Lan-Line Dev"'; then
   ID="Lan-Line Dev"
 else

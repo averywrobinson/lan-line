@@ -12,9 +12,9 @@ sealed partial class MainWindow
 {
     string[] _args = [];
     bool _pairing, _showMode, _pairBusy, _searching;
-    DeviceConfig _device = new();   // this computer's id and its paired computers
+    PairingBook _book = new(new DeviceConfig());   // saved partners plus the pairing in progress; every Hub event goes through it
+    DeviceConfig _device => _book.Config;
     Hub? _hub;
-    Partner? _pendingPartner;       // a pairing being tried; added to the list once it connects
     internal readonly List<PartnerInfo> _partners = [];
     internal string? _sendTarget;   // null = everyone
     DispatcherTimer? _pairTimeout, _rediscover;
@@ -40,7 +40,9 @@ sealed partial class MainWindow
 
     void Boot()
     {
-        try { _device = DeviceConfig.Load(ConfigPath, "connect"); } catch (Exception) { _device = new DeviceConfig(); }
+        DeviceConfig loaded;
+        try { loaded = DeviceConfig.Load(ConfigPath, "connect"); } catch (Exception) { loaded = new DeviceConfig(); }
+        _book = new PairingBook(loaded);
         if (Arg(_args, "--connect") is { } host && _device.Peers.Count == 0)   // flags win (tests)
             try { var legacy = LanLineConfig.Load(ConfigPath); _device.Peers.Add(new Partner { Id = "legacy", Name = legacy.Peer ?? host, Secret = legacy.Token, Role = "connect", Hosts = [host] }); } catch (Exception) { }
         Save();
@@ -71,41 +73,24 @@ sealed partial class MainWindow
         RefreshStatus();
     }
 
-    /// <summary>Hub events that change the saved pairings; the feed handles the rest.</summary>
-    void PartnerEvent(HubEvent e)
+    /// <summary>Carry out what the PairingBook decided, in order.</summary>
+    void Apply(PairingBook.Effect f)
     {
-        switch (e)
+        switch (f)
         {
-            case HubEvent.Rekeyed rk:   // the pairing code was swapped for a long-term secret
-                if (_device.Partner(rk.Partner) is { } p) { _device.Add(p with { Secret = rk.Token }); Save(); }
-                else if (_pendingPartner?.Id == rk.Partner) _pendingPartner = _pendingPartner with { Secret = rk.Token };
+            case PairingBook.Effect.Save: Save(); break;
+            case PairingBook.Effect.HubRemove rm:
+                _hub?.Remove(rm.Id); _partners.RemoveAll(x => x.Id == rm.Id);
+                if (_sendTarget == rm.Id) _sendTarget = null;
                 break;
-            case HubEvent.PeerAddresses pa when _device.Partner(pa.Partner) is { Connects: true } q:   // fallbacks; a moved partner's new address first
-                var hosts = pa.Addrs.Length > 0 && (q.Hosts.Length == 0 || q.Hosts[0] != pa.Addrs[0])
-                    ? pa.Addrs.Concat(q.Hosts) : q.Hosts.Concat(pa.Addrs);
-                _device.Add(q with { Hosts = [.. hosts.Distinct(StringComparer.OrdinalIgnoreCase).Take(6)] }); Save();
+            case PairingBook.Effect.HubRename rn: _hub?.Rename(rn.Old, rn.New); break;
+            case PairingBook.Effect.RenamedLocally rl:
+                var i = _partners.FindIndex(x => x.Id == rl.Old);
+                if (i >= 0) _partners[i] = _partners[i] with { Id = rl.New };
+                if (_sendTarget == rl.Old) _sendTarget = rl.New;
                 break;
-            case HubEvent.PeerDevice pd when pd.Partner != pd.Device: AdoptDeviceId(pd.Partner, pd.Device); break;
-            case HubEvent.Connected c:
-                if (_pendingPartner?.Id == c.Partner) FinishPairing(c.Name);
-                else if (_device.Partner(c.Partner) is { } k && k.Name != c.Name) { _device.Add(k with { Name = c.Name }); Save(); }
-                break;
+            case PairingBook.Effect.Finished fin: FinishPairing(fin.Partner); break;
         }
-    }
-
-    /// <summary>A partner told us its device id: use it as the partner's id. If we already had a partner with that id (paired again), the new pairing replaces it.</summary>
-    void AdoptDeviceId(string old, string dev)
-    {
-        if (_pendingPartner?.Id == old) _pendingPartner = _pendingPartner with { Id = dev };
-        if (_device.Partner(dev) is { } dup && _device.Partner(old) != null)
-        {
-            _device.Forget(dup.Id); _hub?.Remove(dup.Id); _partners.RemoveAll(x => x.Id == dup.Id);
-        }
-        if (_device.Partner(old) is { } p) { _device.Forget(old); _device.Add(p with { Id = dev }); Save(); }
-        var i = _partners.FindIndex(x => x.Id == old);
-        if (i >= 0) _partners[i] = _partners[i] with { Id = dev };
-        if (_sendTarget == old) _sendTarget = dev;
-        _hub?.Rename(old, dev);
     }
 
     void Save()
@@ -125,8 +110,7 @@ sealed partial class MainWindow
 
     void BeginPairing(bool show)
     {
-        if (_pendingPartner is { } old) _hub?.Remove(old.Id);
-        _pendingPartner = null;
+        if (_book.Cancel() is { } old) { _hub?.Remove(old); _partners.RemoveAll(x => x.Id == old); }
         _pairTimeout?.Stop();
         _showMode = show;
         _pairBusy = false;
@@ -147,8 +131,9 @@ sealed partial class MainWindow
         if (show)
         {
             _code = PairCode.Generate();
-            _pendingPartner = new Partner { Id = "pairing-" + Guid.NewGuid().ToString("N")[..8], Name = "New computer", Secret = _code, Role = "listen" };
-            _hub?.Add(_pendingPartner, pairing: true);   // the hub's responder now also answers for this code
+            var pending = new Partner { Id = "pairing-" + Guid.NewGuid().ToString("N")[..8], Name = "New computer", Secret = _code, Role = "listen" };
+            _book.Begin(pending);
+            _hub?.Add(pending, pairing: true);   // the hub's responder now also answers for this code
         }
         else _ = Search();
         RefreshPairPanel();
@@ -156,31 +141,28 @@ sealed partial class MainWindow
 
     void CancelPairing()
     {
-        if (_pendingPartner is { } p) _hub?.Remove(p.Id);
-        _pendingPartner = null;
+        if (_book.Cancel() is { } id) _hub?.Remove(id);
         _pairTimeout?.Stop();
         _pairBusy = false;
         SetPairing(false);
     }
 
-    void FinishPairing(string name)
+    /// <summary>The PairingBook saved the new partner: show it and leave the pairing screen.</summary>
+    void FinishPairing(Partner p)
     {
-        if (_pendingPartner is not { } p) return;
-        _pendingPartner = null;
         _pairTimeout?.Stop();
-        try { _device.Add(p with { Name = name }); } catch (TooManyPartnersException) { Note($"Lan-Line pairs with up to {DeviceConfig.MaxPartners} computers."); }
-        Save();
-        if (!_partners.Any(x => x.Id == p.Id)) _partners.Add(new PartnerInfo(p.Id, name, true));
+        var i = _partners.FindIndex(x => x.Id == p.Id);
+        if (i >= 0) _partners[i] = _partners[i] with { Name = p.Name, Up = true }; else _partners.Add(new PartnerInfo(p.Id, p.Name, true));
         _pairBusy = false;
         SetPairing(false);
-        if (Multi) Note($"Paired with {name}. Send goes to everyone; pick one computer above the message box.", 10);
+        if (Multi) Note($"Paired with {p.Name}. Send goes to everyone; pick one computer above the message box.", 10);
     }
 
     internal void RenamePartner(string id, string name)
     {
         name = name.Trim();
         if (name.Length == 0) return;
-        _device.Rename(id, name); Save();
+        foreach (var f in _book.Rename(id, name)) Apply(f);
         var i = _partners.FindIndex(x => x.Id == id);
         if (i >= 0) _partners[i] = _partners[i] with { Name = name.Length > 64 ? name[..64] : name };
         RefreshStatus();
@@ -188,10 +170,7 @@ sealed partial class MainWindow
 
     internal void ForgetPartner(string id)
     {
-        _device.Forget(id); Save();
-        _hub?.Remove(id);
-        _partners.RemoveAll(x => x.Id == id);
-        if (_sendTarget == id) _sendTarget = null;
+        foreach (var f in _book.Forget(id)) Apply(f);
         _connected = _partners.Any(x => x.Up);
         if (_device.Peers.Count == 0) _statusText = "Not paired yet";
         RefreshStatus();
@@ -214,15 +193,15 @@ sealed partial class MainWindow
         HidePairError();
         _pairBusy = true;
         var p = new Partner { Id = "pairing-" + Guid.NewGuid().ToString("N")[..8], Name = host, Secret = code, Role = "connect", Hosts = [host] };
-        _pendingPartner = p;
+        _book.Begin(p);
         _hub?.Add(p, pairing: false);
         _pairTimeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
         _pairTimeout.Tick += (_, _) =>
         {
             _pairTimeout?.Stop();
-            if (_pendingPartner?.Id != p.Id) return;
-            _hub?.Remove(p.Id);
-            _pendingPartner = null;
+            if (_book.Pending is not { } q || (q.Id != p.Id && q.Id != _book.Resolve(p.Id))) return;
+            _book.Cancel();
+            _hub?.Remove(q.Id);
             _pairBusy = false;
             ShowPairError($"Couldn't pair. Check the code, and that Lan-Line is open on {host}.");
             RefreshPairPanel();

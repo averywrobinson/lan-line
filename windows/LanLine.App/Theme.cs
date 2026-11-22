@@ -1,3 +1,4 @@
+using LanLine.Core;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -66,14 +67,24 @@ static class Theme
             b.Freeze();
             res[key] = b;
         }
-        // Over Acrylic the background is a tint (about 75 %), otherwise solid.
-        var a = Glass ? (IsDark ? "BD" : "CC") : "FF";
-        var bg = new LinearGradientBrush(
-            (Color)ColorConverter.ConvertFromString("#" + a + (IsDark ? "1B2029" : "FBFCFD")),
-            (Color)ColorConverter.ConvertFromString("#" + a + (IsDark ? "11151C" : "EFF1F4")), 90);
+        ApplyBackdrop(res);
+        res["Shadow"] = IsDark ? 0.35 : 0.10;
+    }
+
+    /// <summary>The window opacity setting (beta.8): how opaque the tint over the Acrylic blur is.</summary>
+    public static double GlassOpacity { get; set; } = StorageSettings.DefaultGlassOpacity;
+
+    /// <summary>
+    /// Over Acrylic the background is a tint (the opacity setting; 74 % dark / 80 % light by default), otherwise
+    /// solid. Only this brush changes with the slider: text, bubbles and chips keep their own colors.
+    /// </summary>
+    public static void ApplyBackdrop(ResourceDictionary res)
+    {
+        var a = Glass ? (byte)Math.Round(255 * StorageSettings.TintAlpha(GlassOpacity, IsDark)) : (byte)255;
+        Color C(string hex) { var c = (Color)ColorConverter.ConvertFromString(hex); c.A = a; return c; }
+        var bg = new LinearGradientBrush(C(IsDark ? "#1B2029" : "#FBFCFD"), C(IsDark ? "#11151C" : "#EFF1F4"), 90);
         bg.Freeze();
         res["Bg"] = bg;
-        res["Shadow"] = IsDark ? 0.35 : 0.10;
     }
 
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);

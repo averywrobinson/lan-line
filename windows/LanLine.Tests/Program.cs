@@ -47,6 +47,10 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("hub triangle and everyone", T.HubTriangle), ("hub wrong secret refused", T.HubWrongSecret), ("hub same partner replaces only itself", T.HubReplace),
     ("hub offline partner gets queued items", T.HubOffline), ("hub pairing adds a partner, forget drops it", T.HubPairing),
     ("hub discovery answers per partner", T.HubResponder), ("hub finds a moved partner", T.HubFindMoved),
+    ("pairing: connected with old id after rename finishes", T.PbOldId), ("pairing: connected before peerDevice", T.PbConnectedFirst),
+    ("pairing: late rekey reaches renamed partner", T.PbLateRekey), ("pairing: same computer again replaces it", T.PbRePair),
+    ("pairing: legacy partner learns device id", T.PbLegacy), ("pairing through hubs with async delivery", T.PbHubs),
+    ("stage: args checked", T.StageArgs), ("stage: pipe hands paths over", T.StagePipe), ("glass opacity setting", T.GlassOpacity),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -1390,5 +1394,191 @@ static class T
             H.True(rd.All.OfType<HubEvent.PeerAddresses>().Any(p => p.Addrs.SequenceEqual(["127.0.0.1", "192.0.2.1"])), "new address first");
         }
         finally { d.Stop(); l.Stop(); }
+    }
+
+    // ---------- beta.8: pairing bookkeeping (the "second computer never finishes" fix) ----------
+
+    static PairingBook Book(params Partner[] peers) => new(new DeviceConfig { DeviceId = "device-self", Peers = [.. peers] });
+    static readonly Partner Existing = new() { Id = "device-pc01", Name = "STUDIO-PC", Secret = Secrets.NewToken(), Role = "connect", Hosts = ["10.0.0.2"] };
+    static bool Finished(List<PairingBook.Effect> fx) => fx.Any(f => f is PairingBook.Effect.Finished);
+
+    public static Task PbOldId()
+    {
+        var b = Book(Existing);
+        b.Begin(new Partner { Id = "pairing-1", Name = "New computer", Secret = "ABCDE12345", Role = "listen" });
+        var r1 = b.Handle(new HubEvent.PeerDevice("pairing-1", "device-m3m3"));
+        H.True(r1.Effects.Any(f => f is PairingBook.Effect.HubRename { Old: "pairing-1", New: "device-m3m3" }), "rename to the device id");
+        var r2 = b.Handle(new HubEvent.Connected("pairing-1", "M3 MacBook"));   // late, old id
+        H.Eq(new HubEvent.Connected("device-m3m3", "M3 MacBook") as HubEvent, r2.Event, "event mapped to the new id");
+        H.True(Finished(r2.Effects) && b.Pending == null, $"pairing finished: {string.Join(",", r2.Effects)}");
+        H.True(b.Config.Peers.Select(p => p.Id).SequenceEqual(["device-pc01", "device-m3m3"]), "existing kept, new saved");
+        return Task.CompletedTask;
+    }
+
+    public static Task PbConnectedFirst()
+    {
+        var b = Book();
+        b.Begin(new Partner { Id = "pairing-1", Name = "x", Secret = "ABCDE12345", Role = "connect", Hosts = ["10.0.0.9"] });
+        H.True(Finished(b.Handle(new HubEvent.Connected("pairing-1", "Intel Mac")).Effects), "finished");
+        H.True(b.Handle(new HubEvent.PeerDevice("pairing-1", "device-intel")).Effects.Any(f => f is PairingBook.Effect.Save), "renamed and saved");
+        H.True(b.Config.Peers.Select(p => p.Id).SequenceEqual(["device-intel"]), "saved under the device id");
+        return Task.CompletedTask;
+    }
+
+    public static Task PbLateRekey()
+    {
+        var b = Book();
+        b.Begin(new Partner { Id = "pairing-1", Name = "x", Secret = "ABCDE12345", Role = "listen" });
+        b.Handle(new HubEvent.PeerDevice("pairing-1", "device-m3m3"));
+        var tok = Secrets.NewToken();
+        b.Handle(new HubEvent.Rekeyed("pairing-1", tok));
+        b.Handle(new HubEvent.Connected("pairing-1", "M3"));
+        H.Eq(tok, b.Config.Partner("device-m3m3")?.Secret, "secret on the saved partner");
+        var tok2 = Secrets.NewToken();
+        b.Handle(new HubEvent.Rekeyed("pairing-1", tok2));
+        H.Eq(tok2, b.Config.Partner("device-m3m3")?.Secret, "a later rekey with the old id still lands");
+        return Task.CompletedTask;
+    }
+
+    public static Task PbRePair()
+    {
+        var b = Book(Existing);
+        b.Begin(new Partner { Id = "pairing-2", Name = "x", Secret = "ZZZZZ99999", Role = "listen" });
+        var r = b.Handle(new HubEvent.PeerDevice("pairing-2", "device-pc01"));
+        H.True(r.Effects[0] is PairingBook.Effect.HubRemove { Id: "device-pc01" }, "old pairing's Session goes first");
+        b.Handle(new HubEvent.Connected("pairing-2", "STUDIO-PC"));
+        H.True(b.Config.Peers.Count == 1 && b.Config.Peers[0] is { Id: "device-pc01", Secret: "ZZZZZ99999", Role: "listen" }, "replaced, not duplicated");
+        return Task.CompletedTask;
+    }
+
+    public static Task PbLegacy()
+    {
+        var b = Book(new Partner { Id = "legacy-abcd1234", Name = "PC", Secret = Secrets.NewToken(), Role = "connect", Hosts = ["10.0.0.2"] });
+        b.Handle(new HubEvent.PeerDevice("legacy-abcd1234", "device-pc01"));
+        var r = b.Handle(new HubEvent.Connected("legacy-abcd1234", "PC"));
+        H.True(r.Event is HubEvent.Connected { Partner: "device-pc01" } && !Finished(r.Effects), "mapped, nothing finishes");
+        H.True(b.Config.Peers.Select(p => p.Id).SequenceEqual(["device-pc01"]), "renamed in place");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>End to end with real Hubs and window-like delivery (events hop to another queue; renames go back async).</summary>
+    public static async Task PbHubs()
+    {
+        var main = new SerialQueue("fake-main");
+        var book = new PairingBook(new DeviceConfig { DeviceId = "device-aaaa" });
+        var ra = new HubRec(); var rd = new HubRec();
+        Hub? a = null;
+        a = new Hub(HubCfg("A", "device-aaaa"), [], e => main.Post(() =>
+        {
+            var (ev, fx) = book.Handle(e);
+            ra.Add(ev);
+            foreach (var f in fx)
+            {
+                if (f is PairingBook.Effect.HubRename rn) a!.Rename(rn.Old, rn.New);
+                if (f is PairingBook.Effect.HubRemove rm) _ = Task.Run(() => a!.Remove(rm.Id));
+            }
+        }));
+        a.Start();
+        try
+        {
+            const string code = "PAIRM31234";
+            var pending = new Partner { Id = "pairing-x", Name = "New computer", Secret = code, Role = "listen" };
+            main.Sync(() => { book.Begin(pending); return 0; });
+            a.Add(pending, pairing: true);
+            await H.Until(() => a.BoundPort != null, "A listening", 5);
+            var d = new Hub(HubCfg("D", "device-m3m3"), [P("pairing-y", "A", code, "connect", a.BoundPort)], rd.Add);
+            d.Start();
+            try
+            {
+                await H.Until(() => main.Sync(() => book.Pending == null && book.Config.Partner("device-m3m3") != null), "pairing finished and saved", 10);
+                H.Eq(64, main.Sync(() => book.Config.Partner("device-m3m3")!.Secret.Length), "long-term secret saved");
+                var t = d.SendText("hello A", null);
+                await H.Until(() => ra.Got("device-m3m3").Count == 1, "text arrives under the new id", 5);
+                await H.Until(() => rd.Last(t.Id)?.Summary.Kind == ItemStateKind.Delivered, "delivered", 5);
+            }
+            finally { d.Stop(); }
+        }
+        finally { a.Stop(); main.Dispose(); }
+    }
+
+    // ---------- beta.8: Explorer hand-off and the opacity setting
+
+    public static Task StageArgs()
+    {
+        var dir = Directory.CreateTempSubdirectory("ll-stage").FullName;
+        try
+        {
+            var f = Path.Combine(dir, "note one & ü.txt"); File.WriteAllText(f, "x");
+            var d = Path.Combine(dir, "Folder & One"); Directory.CreateDirectory(d);
+            H.Eq(null, StageRequest.FromArgs(["--demo"]), "no flag");
+            var got = StageRequest.FromArgs(["--stage", f, "\"" + d + "\\\"", f.ToUpperInvariant(), "relative.txt", Path.Combine(dir, "..", "x"),
+                                             Path.Combine(dir, "missing.txt"), "", "a\0b"])!;
+            H.Eq(2, got.Count, "file + folder, the rest refused");
+            H.Eq(f, got[0], "file kept as given");
+            H.Eq(d, got[1], "folder: quotes and trailing slash dropped");
+            H.Eq(0, StageRequest.FromArgs(["--stage"])!.Count, "flag alone = just show the window");
+            var many = Enumerable.Range(0, 300).Select(i => $"C:\\x\\{i}.txt");
+            H.Eq(StageRequest.MaxPaths, StageRequest.Clean(many, _ => true).Count, "capped");
+            H.Eq(null, StageRequest.Decode("hello\nC:\\x", _ => true), "foreign message ignored");
+            var back = StageRequest.Decode(StageRequest.Encode([f, d]))!;
+            H.True(back.SequenceEqual([f, d]), "encode/decode round trip");
+            H.Eq(0, StageRequest.Decode(StageRequest.Encode([f.Replace("note", "gone")]))!.Count, "decode re-checks paths");
+        }
+        finally { Directory.Delete(dir, true); }
+        return Task.CompletedTask;
+    }
+
+    public static async Task StagePipe()
+    {
+        var dir = Directory.CreateTempSubdirectory("ll-stagepipe").FullName;
+        var name = "Lan-Line.Stage.test." + Guid.NewGuid().ToString("N");
+        using var cts = new CancellationTokenSource();
+        var got = new ConcurrentQueue<List<string>>();
+        try
+        {
+            var f = Path.Combine(dir, "a.txt"); File.WriteAllText(f, "x");
+            // the client starts first, like a second Explorer launch racing the first window
+            var send = Task.Run(() => StageRequest.TrySend(name, [f, "C:\\nope\\gone.txt"], TimeSpan.FromSeconds(5)));
+            await Task.Delay(400);
+            var server = StageRequest.Listen(name, got.Enqueue, cts.Token);
+            H.True(await send, "sent after the server came up");
+            await H.Until(() => got.Count == 1, "request arrived", 5);
+            got.TryDequeue(out var first);
+            H.True(first!.SequenceEqual([f]), "only the existing path staged");
+            H.True(StageRequest.TrySend(name, [], TimeSpan.FromSeconds(2)), "show-only request");
+            await H.Until(() => got.Count == 1, "second request", 5);
+            H.True(!StageRequest.TrySend("Lan-Line.Stage.nobody." + Guid.NewGuid().ToString("N"), [f], TimeSpan.FromMilliseconds(600)), "no window: false");
+            cts.Cancel();
+            await server;
+        }
+        finally { cts.Cancel(); Directory.Delete(dir, true); }
+    }
+
+    public static Task GlassOpacity()
+    {
+        var s = new StorageSettings();
+        H.Eq(null, s.GlassOpacity, "unset by default");
+        H.True(Math.Abs(StorageSettings.TintAlpha(s.GlassOpacityValue, true) - 0xBD / 255.0) < 0.002, "default dark = today's #BD");
+        H.True(Math.Abs(StorageSettings.TintAlpha(s.GlassOpacityValue, false) - 0xCC / 255.0) < 0.002, "default light = today's #CC");
+        foreach (var (v, want) in new[] { (0.1, 0.40), (0.55, 0.55), (1.7, 1.0), (double.NaN, 0.74) })
+        {
+            s.GlassOpacity = v;
+            H.True(Math.Abs(s.GlassOpacityValue - want) < 1e-9, $"clamp {v}");
+        }
+        H.Eq(1.0, StorageSettings.TintAlpha(1.0, false), "never above 1");
+        var dir = Directory.CreateTempSubdirectory("ll-glass").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "settings.json");
+            File.WriteAllText(path, "{\"retentionDays\":30,\"confirmed\":true}");   // a beta.7 file
+            var old = StorageSettings.Load(path);
+            H.True(old.RetentionDays == 30 && old.GlassOpacity == null, "old file loads, default look");
+            old.GlassOpacity = 0.5; old.Save(path);
+            H.Eq(0.5, StorageSettings.Load(path).GlassOpacityValue, "saved and read back");
+            H.True(File.ReadAllText(path).Contains("\"glassOpacity\": 0.5"), "same key as the Mac");
+            H.Eq(0.5, old.Copy().GlassOpacity, "copied with the other settings");
+        }
+        finally { Directory.Delete(dir, true); }
+        return Task.CompletedTask;
     }
 }

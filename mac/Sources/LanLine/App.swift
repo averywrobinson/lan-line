@@ -1,3 +1,4 @@
+import Combine
 import AppKit
 import SwiftUI
 import LanLineCore
@@ -17,6 +18,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: break
         }
+        DebugLog.path = options.value("--debug-log")
         buildMenu()
         model.glass = options.value("--snapshot") == nil && !options.flag("--no-glass")
         buildPanel()
@@ -24,6 +26,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else if let m = options.value("--demo-pair") { Demo.pair(model, mode: m) }
         else if options.flag("--demo-multi") { Demo.multi(model) }
         else if options.flag("--demo") { Demo.fill(model, empty: options.flag("--empty")) } else { boot() }
+        if let v = options.value("--glass-opacity").flatMap(Double.init) {   // screenshots of the opacity setting
+            model.storage.glassOpacity = StorageSettings.clampOpacity(v)
+            model.glassOpacity = model.storage.glassOpacityValue
+        }
         if let out = options.value("--snapshot") { snapshot(to: out) }
     }
 
@@ -50,6 +56,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ n: Notification) { stopAll() }
 
+    /// `lanline://stage?p=<path>&t=<text>`: from the Share extension (or `open lanline://…`). Stages, never sends.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for u in urls {
+            guard let s = StageRequest(url: u) else { DebugLog.write("ignored url \(u.scheme ?? "?")://\(u.host ?? "")"); continue }
+            DebugLog.write("stage request: \(s.paths.count) paths, \(s.texts.count) texts")
+            model.stage(s)
+            showPanel(activate: true)
+        }
+    }
+
     // MARK: session and pairing
 
     private var pairTimeout: DispatchWorkItem?
@@ -63,9 +79,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var logURL: URL { options.configURL.deletingLastPathComponent().appendingPathComponent("received.json") }
     private var cleanupTimer: Timer?
     private var frameBeforeSettings: NSRect?
+    private var blurFade: AnyCancellable?
 
     private func setUpStorage() {
         model.storage = StorageSettings.load(from: settingsURL)
+        model.glassOpacity = model.storage.glassOpacityValue
         model.settingsActions = SettingsActions(
             save: { [weak self] s in self?.saveSettings(s) },
             cleanNow: { [weak self] in self?.runCleanup(manual: true) },
@@ -75,7 +93,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 NSWorkspace.shared.open(dir)
             },
-            cancel: { [weak self] in self?.model.showingSettings = false; self?.restoreAfterSettings() })
+            cancel: { [weak self] in
+                guard let self else { return }
+                self.model.glassOpacity = self.model.storage.glassOpacityValue   // undo a slider preview
+                self.model.showingSettings = false; self.restoreAfterSettings()
+            })
         runCleanup(manual: false)
         if let a = savedLatest() { model.showUpdate(version: a.version.description, url: a.url) }
         checkForUpdates(manual: false)
@@ -131,6 +153,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         n.lastUpdateCheck = model.storage.lastUpdateCheck
         n.latestVersion = model.storage.latestVersion; n.latestURL = model.storage.latestURL
         model.storage = n
+        model.glassOpacity = n.glassOpacityValue
         do { try n.save(to: settingsURL) } catch { model.note("Couldn't save settings: \(error.localizedDescription)") }
         model.showingSettings = false
         model.settingsFirstRun = false
@@ -218,7 +241,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func settingsFromMenu() { showPanel(activate: true); showSettings() }
 
     private func boot() {
-        DebugLog.path = options.value("--debug-log")
         model.myName = options.name
         model.pairActions = PairActions(
             switchMode: { [weak self] m in self?.beginPairing(m) },
@@ -229,17 +251,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             rename: { [weak self] id, name in self?.renamePartner(id, name) },
             forget: { [weak self] id in self?.forgetPartner(id) },
             pairAnother: { [weak self] in self?.model.showingSettings = false; self?.restoreAfterSettings(); self?.beginPairing(.show) })
-        device = (try? DeviceConfig.load(from: options.configURL, defaultRole: "listen")) ?? DeviceConfig()
-        if let host = options.value("--connect"), device.peers.isEmpty, let legacy = try? LanLineConfig.load(from: options.configURL) {
-            device.peers = [Partner(id: "legacy", name: legacy.peer ?? host, secret: legacy.token, role: "connect", hosts: [host])]   // flags win
+        var loaded = (try? DeviceConfig.load(from: options.configURL, defaultRole: "listen")) ?? DeviceConfig()
+        if let host = options.value("--connect"), loaded.peers.isEmpty, let legacy = try? LanLineConfig.load(from: options.configURL) {
+            loaded.peers = [Partner(id: "legacy", name: legacy.peer ?? host, secret: legacy.token, role: "connect", hosts: [host])]   // flags win
         }
+        book = PairingBook(config: loaded)
         save()
         startHub()
         if device.peers.isEmpty { beginPairing(.show) }
         setUpStorage()
     }
 
-    private var device = DeviceConfig()
+    /// Saved partners plus the pairing in progress; every Hub event goes through it (PairingBook).
+    private var book = PairingBook(config: DeviceConfig())
+    private var device: DeviceConfig { book.config }
 
     private var downloadsDir: URL { options.value("--downloads").map { URL(fileURLWithPath: $0) } ?? LanLineConfig.downloadsDir }
 
@@ -274,27 +299,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case .text: break
             }
         }
-        switch e {
-        case .rekeyed(let p, let t):   // the pairing code was swapped for a long-term secret
-            if let i = device.peers.firstIndex(where: { $0.id == p }) { device.peers[i].secret = t; save() }
-            else if var q = pendingPartner, q.id == p { q.secret = t; pendingPartner = q }
-        case .peerAddresses(let p, let a):   // the partner's other addresses become fallback hosts
-            if let i = device.peers.firstIndex(where: { $0.id == p }), device.peers[i].connects {
-                var out: [String] = []
-                for x in device.peers[i].hosts + a where !out.contains(x) { out.append(x) }
-                if a.first.map({ device.peers[i].hosts.first != $0 }) ?? false { out = [a[0]] + out.filter { $0 != a[0] } }
-                device.peers[i].hosts = Array(out.prefix(6)); save()
-            }
-        case .peerDevice(let p, let d):   // key the partner by its real device id (pairing again replaces, not duplicates)
-            if p != d { adoptDeviceID(p, d) }
-        case .updateAvailable(let v, let u) where model.storage.latestVersion != v:   // remember it across launches
+        let (ev, effects) = book.handle(e)   // event ids follow renames; the pairing in progress finishes here
+        for f in effects { apply(f) }
+        if case .updateAvailable(let v, let u) = ev, model.storage.latestVersion != v {   // remember it across launches
             var s = model.storage; s.latestVersion = v; s.latestURL = u; model.storage = s
             try? s.save(to: settingsURL)
-        case .connected(let p, let name):
-            if let q = pendingPartner, q.id == p { finishPairing(name) }
-            else if let i = device.peers.firstIndex(where: { $0.id == p }), device.peers[i].name != name { device.peers[i].name = name; save() }
-        default: break
         }
+        let e = ev
         model.handle(e)
         // --debug-paste PATH: once connected, put PATH on the clipboard the way Finder's Copy does and run Paste.
         if case .connected = e, !debugPasteDone, let path = options.value("--debug-paste") {
@@ -314,19 +325,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// A partner told us its device id: use it as the partner's id from now on. If we already had a partner with
-    /// that id (paired again), the new pairing replaces it.
-    private func adoptDeviceID(_ old: String, _ new: String) {
-        if pendingPartner?.id == old { pendingPartner?.id = new }
-        if let dup = device.peers.firstIndex(where: { $0.id == new }), device.peers.contains(where: { $0.id == old }) {
-            let gone = device.peers.remove(at: dup)
-            model.hub?.remove(gone.id)
-            model.partners.removeAll { $0.id == gone.id }
+    /// Carry out what the PairingBook decided, in order.
+    private func apply(_ f: PairingBook.Effect) {
+        switch f {
+        case .save: save()
+        case .hubRemove(let id):
+            model.hub?.remove(id)
+            model.partners.removeAll { $0.id == id }
+            if model.sendTarget == id { model.sendTarget = nil }
+        case .hubRename(let old, let new): model.hub?.rename(partner: old, to: new)
+        case .renamedLocally(let old, let new):
+            if let i = model.partners.firstIndex(where: { $0.id == old }) { model.partners[i] = PartnerInfo(id: new, name: model.partners[i].name, up: model.partners[i].up) }
+            if model.sendTarget == old { model.sendTarget = new }
+        case .finished(let p): finishPairing(p)
         }
-        if let i = device.peers.firstIndex(where: { $0.id == old }) { device.peers[i].id = new; save() }
-        if let i = model.partners.firstIndex(where: { $0.id == old }) { model.partners[i] = PartnerInfo(id: new, name: model.partners[i].name, up: model.partners[i].up) }
-        if model.sendTarget == old { model.sendTarget = new }
-        model.hub?.rename(partner: old, to: new)
     }
 
     private func save() {
@@ -342,11 +354,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: pairing adds a partner; the others stay connected
 
-    private var pendingPartner: Partner?
 
     private func beginPairing(_ mode: PairMode) {
-        if let q = pendingPartner { model.hub?.remove(q.id); model.partners.removeAll { $0.id == q.id } }
-        pendingPartner = nil
+        if let id = book.cancel() { model.hub?.remove(id); model.partners.removeAll { $0.id == id } }
         pairTimeout?.cancel()
         model.pairing = true
         model.pairMode = mode
@@ -364,7 +374,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.pairCode = code
             model.myAddresses = Discovery.localAddresses()
             let p = Partner(id: "pairing-" + UUID().uuidString.prefix(8), name: "New computer", secret: code, role: "listen", hosts: [])
-            pendingPartner = p
+            book.begin(p)
             model.hub?.add(p, pairing: true)   // the hub's responder now also answers for this code
         case .enter:
             search()
@@ -372,24 +382,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func cancelPairing() {
-        if let q = pendingPartner { model.hub?.remove(q.id) }
-        pendingPartner = nil
+        if let id = book.cancel() { model.hub?.remove(id) }
         pairTimeout?.cancel()
         model.pairing = false
         model.pairBusy = false
     }
 
-    private func finishPairing(_ name: String) {
-        guard var p = pendingPartner else { return }
-        pendingPartner = nil
+    /// The PairingBook saved the new partner: show it and leave the pairing screen.
+    private func finishPairing(_ p: Partner) {
         pairTimeout?.cancel()
-        p.name = name
-        do { try device.add(p) } catch { model.note("Lan-Line pairs with up to \(DeviceConfig.maxPartners) computers.") }
-        save()
-        if !model.partners.contains(where: { $0.id == p.id }) { model.partners.append(PartnerInfo(id: p.id, name: name, up: true)) }
+        if let i = model.partners.firstIndex(where: { $0.id == p.id }) { model.partners[i].name = p.name; model.partners[i].up = true }
+        else { model.partners.append(PartnerInfo(id: p.id, name: p.name, up: true)) }
         model.pairing = false
         model.pairBusy = false
-        if model.multi { model.note("Paired with \(name). Send goes to everyone; pick one computer next to Send.", fadeAfter: 10) }
+        if model.multi { model.note("Paired with \(p.name). Send goes to everyone; pick one computer next to Send.", fadeAfter: 10) }
     }
 
     private func search() {
@@ -413,13 +419,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.pairError = nil
         model.pairBusy = true
         let p = Partner(id: "pairing-" + UUID().uuidString.prefix(8), name: host, secret: code, role: "connect", hosts: [host])
-        pendingPartner = p
+        book.begin(p)
         model.hub?.add(p, pairing: false)
         let t = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, let q = self.pendingPartner, q.id == p.id else { return }
+                guard let self, let q = self.book.pending, q.id == p.id || q.id == self.book.resolve(p.id) else { return }
+                _ = self.book.cancel()
                 self.model.hub?.remove(q.id)
-                self.pendingPartner = nil
                 self.model.pairBusy = false
                 self.model.pairError = "Couldn't pair. Check the code, and that Lan-Line is open on \(host)."
             }
@@ -431,15 +437,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func renamePartner(_ id: String, _ name: String) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else { return }
-        device.rename(id, to: n); save()
+        for f in book.rename(id, to: n) { apply(f) }
         if let i = model.partners.firstIndex(where: { $0.id == id }) { model.partners[i].name = String(n.prefix(64)) }
     }
 
     private func forgetPartner(_ id: String) {
-        device.forget(id); save()
-        model.hub?.remove(id)
-        model.partners.removeAll { $0.id == id }
-        if model.sendTarget == id { model.sendTarget = nil }
+        for f in book.forget(id) { apply(f) }
         model.connected = model.partners.contains { $0.up }
         if device.peers.isEmpty { model.status = "Not paired yet" }
     }
@@ -473,14 +476,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // Smoked glass: the system blurs what is behind the window; the SwiftUI background tints it.
             p.isOpaque = false
             p.backgroundColor = .clear
+            // The blur is a layer *under* the content (not its parent), so the opacity setting can fade it
+            // without touching text.
+            let root = NSView()
             let fx = NSVisualEffectView()
             fx.material = .underWindowBackground
             fx.blendingMode = .behindWindow
             fx.state = .active          // stay glassy while another app is in front (the panel floats)
-            host.frame = fx.bounds
-            host.autoresizingMask = [.width, .height]
-            fx.addSubview(host)
-            p.contentView = fx
+            for v in [fx, host] as [NSView] { v.frame = root.bounds; v.autoresizingMask = [.width, .height]; root.addSubview(v) }
+            p.contentView = root
+            blurFade = model.$glassOpacity.sink { [weak fx] v in fx?.alphaValue = StorageSettings.blurAlpha(v) }
         } else {
             p.contentView = host
         }

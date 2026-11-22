@@ -78,6 +78,8 @@ struct SettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(p.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                OpacityRow(model: model, draft: $draft)
+
                 if model.unmanagedCount > 0 {
                     Text("Also in the folder: \(model.unmanagedCount) file\(model.unmanagedCount == 1 ? "" : "s") (\(Cleanup.formatBytes(model.unmanagedBytes))) from before this version or added by you. Lan-Line leaves these alone.")
                         .font(.system(size: 11)).foregroundStyle(p.textSecondary)
@@ -142,6 +144,45 @@ struct SettingsView: View {
         error = nil
         s.confirmed = true
         return s
+    }
+}
+
+/// Window opacity: how see-through the smoked glass is. Moves the backdrop live while dragging; Save keeps it,
+/// Cancel puts it back. Text, bubbles and chips are not changed.
+private struct OpacityRow: View {
+    @ObservedObject var model: AppModel
+    @Binding var draft: StorageSettings
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let p = Palette.of(scheme)
+        let value = Binding<Double>(
+            get: { draft.glassOpacityValue },
+            set: { v in
+                let r = (v * 100).rounded() / 100
+                draft.glassOpacity = abs(r - StorageSettings.defaultGlassOpacity) < 0.001 ? nil : r
+                model.glassOpacity = draft.glassOpacityValue
+            })
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Window opacity").font(.system(size: 11.5, weight: .medium)).foregroundStyle(p.textSecondary)
+            HStack(spacing: 10) {
+                Slider(value: value, in: StorageSettings.glassOpacityRange) {
+                    Text("Window opacity")
+                } minimumValueLabel: {
+                    Image(systemName: "circle.lefthalf.filled").font(.system(size: 10)).foregroundStyle(p.icon)
+                } maximumValueLabel: {
+                    Image(systemName: "circle.fill").font(.system(size: 10)).foregroundStyle(p.icon)
+                }
+                .labelsHidden().controlSize(.small)
+                .accessibilityValue("\(Int((draft.glassOpacityValue * 100).rounded())) percent")
+                Text("\(Int((draft.glassOpacityValue * 100).rounded()))%")
+                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(p.text).frame(width: 38, alignment: .trailing)
+                Button("Default") { value.wrappedValue = StorageSettings.defaultGlassOpacity }
+                    .controlSize(.small).disabled(draft.glassOpacity == nil)
+            }
+            Text("Changes only the smoked-glass background; text stays fully readable.")
+                .font(.system(size: 11)).foregroundStyle(p.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

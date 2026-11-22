@@ -4,7 +4,7 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.7"
+#define AppVersionFull "0.9.0-beta.8"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif
@@ -67,9 +67,19 @@ Type: files; Name: "{app}\*.pdb"
 [Icons]
 Name: "{userprograms}\Lan-Line"; Filename: "{app}\Lan-Line.exe"
 Name: "{userdesktop}\Lan-Line"; Filename: "{app}\Lan-Line.exe"; Tasks: desktopicon
+; Explorer: right-click → Send to → Lan-Line (beta.8). Stages the files in the window; nothing is sent until Send.
+Name: "{usersendto}\Lan-Line"; Filename: "{app}\Lan-Line.exe"; Parameters: "--stage"; Comment: "Get these ready to send with Lan-Line"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Lan-Line"; ValueData: """{app}\Lan-Line.exe"""; Flags: uninsdeletevalue; Tasks: startup
+; "Send with Lan-Line" for files and folders (beta.8). Per user, so no admin prompt; on Windows 11 it is under
+; "Show more options" (the new top-level menu only lists packaged, signed apps). Removed on uninstall.
+Root: HKCU; Subkey: "Software\Classes\*\shell\LanLine.Send"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Send with Lan-Line"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\LanLine.Send"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\Lan-Line.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\*\shell\LanLine.Send\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Lan-Line.exe"" --stage ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Send with Lan-Line"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\Lan-Line.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Lan-Line.exe"" --stage ""%1"""
 
 [Run]
 Filename: "{app}\Lan-Line.exe"; Description: "Open Lan-Line"; Flags: nowait postinstall skipifsilent

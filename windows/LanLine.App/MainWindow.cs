@@ -40,6 +40,10 @@ sealed partial class MainWindow : Window
     readonly Border _composer;
     readonly FrameworkElement _pairPanel;
     readonly Dictionary<string, ItemRow> _rows = [];
+    // Files and folders from Explorer's Send to (beta.8), shown as chips until Send.
+    readonly List<string> _staged = [];
+    readonly StackPanel _stagedStrip = new() { Margin = new Thickness(14, 4, 14, 0), Visibility = Visibility.Collapsed };
+    readonly WrapPanel _stagedChips = new();
     const int MaxRows = 200;
     bool _connected, _pinned = true, _draggingOwnChip;
     string _peer = "", _statusText = "Starting…";
@@ -146,11 +150,13 @@ sealed partial class MainWindow : Window
         composer.MouseLeftButtonDown += (_, _) => _input.Focus();
         _input.TextChanged += (_, _) =>
         {
-            var has = !string.IsNullOrWhiteSpace(_input.Text);
             _placeholder.Visibility = _input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-            _send.IsEnabled = has;
-            _send.Visibility = has ? Visibility.Visible : Visibility.Collapsed;
+            RefreshSend();
         };
+        var stagedNote = new TextBlock { Text = "Ready to send. Press Send, or remove what you don't want.", FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 0, 0, 4) };
+        stagedNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        _stagedStrip.Children.Add(stagedNote);
+        _stagedStrip.Children.Add(new ScrollViewer { Content = _stagedChips, MaxHeight = 70, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         _send.Visibility = Visibility.Collapsed;
 
         _dropOverlay = BuildDropOverlay();
@@ -165,6 +171,7 @@ sealed partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         DockPanel.SetDock(hairline, Dock.Top);
         DockPanel.SetDock(composer, Dock.Bottom);
+        DockPanel.SetDock(_stagedStrip, Dock.Bottom);
         DockPanel.SetDock(_target, Dock.Bottom);
         _target.SetResourceReference(StyleProperty, "LinkButton");
         _target.FontSize = 11;
@@ -173,6 +180,7 @@ sealed partial class MainWindow : Window
         root.Children.Add(header);
         root.Children.Add(hairline);
         root.Children.Add(composer);
+        root.Children.Add(_stagedStrip);
         root.Children.Add(_target);
         // The DockPanel's last child fills the rest of the window: the feed and the pairing panel share it
         // (only one is visible). Adding them as two children would dock the feed left at its content width.
@@ -339,9 +347,10 @@ sealed partial class MainWindow : Window
 
     // ---------- session events
 
-    void Handle(HubEvent e)
+    void Handle(HubEvent raw)
     {
-        PartnerEvent(e);
+        var (e, effects) = _book.Handle(raw);   // event ids follow renames; the pairing in progress finishes here
+        foreach (var f in effects) Apply(f);
         switch (e)
         {
             case HubEvent.Listening: if (!_connected) _statusText = _partners.Count == 0 ? "Not paired yet" : $"Waiting for {Away}…"; break;
@@ -473,9 +482,65 @@ sealed partial class MainWindow : Window
     void SendInput()
     {
         var t = _input.Text;
-        if (string.IsNullOrWhiteSpace(t) || _hub == null || _partners.Count == 0) return;
-        UpsertOutgoing(_hub.SendText(t, _sendTarget));
-        _input.Clear();
+        var hasText = !string.IsNullOrWhiteSpace(t);
+        if ((!hasText && _staged.Count == 0) || _hub == null || _pairing) return;
+        if (_partners.Count == 0) { if (_staged.Count > 0) Note("Not paired yet: nothing was sent"); return; }
+        if (_staged.Count > 0)
+        {
+            var paths = _staged.ToList();
+            _staged.Clear();
+            RefreshStaged();
+            SendFiles(paths);
+        }
+        if (hasText) { UpsertOutgoing(_hub.SendText(t, _sendTarget)); _input.Clear(); }
+    }
+
+    void RefreshSend()
+    {
+        var has = !string.IsNullOrWhiteSpace(_input.Text) || _staged.Count > 0;
+        _send.IsEnabled = has;
+        _send.Visibility = has ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Paths from Explorer (already checked): shown as chips; nothing is sent until Send.</summary>
+    internal void Stage(List<string> paths, bool show = true)
+    {
+        foreach (var p in paths)
+            if (_staged.Count < StageRequest.MaxPaths && !_staged.Contains(p, StringComparer.OrdinalIgnoreCase)) _staged.Add(p);
+        RefreshStaged();
+        if (!show) return;
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Show();
+        Activate();
+        _input.Focus();
+    }
+
+    void RefreshStaged()
+    {
+        _stagedChips.Children.Clear();
+        foreach (var p in _staged)
+        {
+            var folder = Directory.Exists(p);
+            var name = System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(p));
+            if (name.Length == 0) name = p;
+            var icon = new TextBlock { Text = folder ? Glyph_Folder : Glyph_Doc, FontFamily = (FontFamily)Application.Current.Resources["IconFont"], FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+            icon.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            var label = new TextBlock { Text = name, FontSize = 12, MaxWidth = 180, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, ToolTip = p };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+            var x = new Button { Content = Glyph_Close, FontFamily = (FontFamily)Application.Current.Resources["IconFont"], FontSize = 8, Margin = new Thickness(6, 0, 0, 0), ToolTip = "Remove", VerticalAlignment = VerticalAlignment.Center };
+            x.SetResourceReference(StyleProperty, "LinkButton");
+            System.Windows.Automation.AutomationProperties.SetName(x, $"Remove {name}");
+            var path = p;
+            x.Click += (_, _) => { _staged.Remove(path); RefreshStaged(); };
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(icon); row.Children.Add(label); row.Children.Add(x);
+            var chip = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Padding = new Thickness(10, 3, 8, 3), Margin = new Thickness(0, 0, 6, 6), Child = row };
+            chip.SetResourceReference(Border.BackgroundProperty, "InputFill");
+            chip.SetResourceReference(Border.BorderBrushProperty, "InputStroke");
+            _stagedChips.Children.Add(chip);
+        }
+        _stagedStrip.Visibility = _staged.Count > 0 && _composer.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
+        RefreshSend();
     }
 
     void SendFiles(IEnumerable<string> paths)

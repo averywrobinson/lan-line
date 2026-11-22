@@ -21,7 +21,7 @@ struct ContentView: View {
                 Composer(model: model)
             }
         }
-        .background(Background(glass: model.glass))
+        .background(Background(glass: model.glass, opacity: model.glassOpacity))
         .overlay { if model.dropTargeted && !model.pairing && !model.showingSettings { DropOverlay(peer: model.peerLabel) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $model.dropTargeted) { providers in
             for prov in providers {
@@ -38,10 +38,11 @@ struct ContentView: View {
 
 private struct Background: View {
     var glass = false
+    var opacity = StorageSettings.defaultGlassOpacity
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         let p = Palette.of(scheme)
-        let a = glass ? (scheme == .dark ? 0.74 : 0.80) : 1
+        let a = glass ? StorageSettings.tintAlpha(opacity, dark: scheme == .dark) : 1
         ZStack {
             LinearGradient(colors: [p.bgTop.opacity(a), p.bgBottom.opacity(a)], startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [p.glow, .clear], center: .top, startRadius: 0, endRadius: 320)

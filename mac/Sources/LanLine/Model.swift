@@ -16,6 +16,19 @@ struct Row: Identifiable {
     var delivered = 0, total = 1
 }
 
+/// Something shared into Lan-Line (Finder → Share), waiting above the message box until the user presses Send.
+struct StagedItem: Identifiable, Equatable {
+    enum Kind: Equatable { case path(URL), text(String) }
+    let id = UUID()
+    let kind: Kind
+    var label: String {
+        switch kind {
+        case .path(let u): return u.lastPathComponent
+        case .text(let t): return t.count > 40 ? String(t.prefix(40)) + "…" : t
+        }
+    }
+}
+
 /// One paired computer as the window shows it.
 struct PartnerInfo: Identifiable, Equatable {
     let id: String
@@ -39,6 +52,8 @@ final class AppModel: ObservableObject {
     @Published var dropTargeted = false
     /// Translucent window (off for snapshots, which can't capture the blur).
     @Published var glass = false
+    /// The backdrop opacity shown right now (follows the Settings slider live; saved on Save).
+    @Published var glassOpacity = StorageSettings.defaultGlassOpacity
 
     // storage settings (shown over everything until the user has saved them once)
     @Published var showingSettings = false
@@ -66,6 +81,8 @@ final class AppModel: ObservableObject {
     var hub: Hub?
     /// Paired computers, in pairing order.
     @Published var partners: [PartnerInfo] = []
+    /// Shared from another app, not sent yet.
+    @Published var staged: [StagedItem] = []
     /// Where Send goes: nil = everyone, else a partner id.
     @Published var sendTarget: String?
     var multi: Bool { partners.count >= 2 }
@@ -186,11 +203,34 @@ final class AppModel: ObservableObject {
 
     // MARK: sending
 
+    /// Send: the staged items (if any) and the typed text (if any), to the current target.
     @discardableResult
     func sendText(_ text: String) -> Bool {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let h = hub, !partners.isEmpty else { return false }
-        upsertOutgoing(h.send(text: text, to: sendTarget))
+        let typed = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard typed || !staged.isEmpty else { return false }
+        guard let h = hub, !partners.isEmpty else { note("Not paired yet: nothing was sent"); return false }
+        if !staged.isEmpty { sendStaged() }
+        if typed { upsertOutgoing(h.send(text: text, to: sendTarget)) }
         return true
+    }
+
+    /// Items shared from Finder or another app wait here; nothing is sent until Send.
+    func stage(_ r: StageRequest) {
+        for p in r.paths where !staged.contains(where: { $0.kind == .path(URL(fileURLWithPath: p)) }) {
+            staged.append(StagedItem(kind: .path(URL(fileURLWithPath: p))))
+        }
+        for t in r.texts { staged.append(StagedItem(kind: .text(t))) }
+        if staged.count > 200 { staged.removeFirst(staged.count - 200) }
+    }
+
+    func unstage(_ id: UUID) { staged.removeAll { $0.id == id } }
+
+    private func sendStaged() {
+        let items = staged
+        staged = []
+        let urls = items.compactMap { if case .path(let u) = $0.kind { return u }; return nil }
+        if !urls.isEmpty { sendFiles(urls) }
+        for case .text(let t) in items.map(\.kind) { if let h = hub { upsertOutgoing(h.send(text: t, to: sendTarget)) } }
     }
 
     func sendFiles(_ urls: [URL], fromDrop: Bool = false) {

@@ -21,8 +21,36 @@ public struct StorageSettings: Codable, Sendable, Equatable {
     /// The newest version this computer heard of (from an update check or the other computer), and its page.
     public var latestVersion: String?
     public var latestURL: String?
+    /// How opaque the smoked-glass backdrop is, 0.40–1.00 (beta.8). nil = the default look. Only the backdrop
+    /// changes; text, bubbles and chips keep their own colors.
+    public var glassOpacity: Double?
 
     public init() {}
+
+    public static let glassOpacityRange: ClosedRange<Double> = 0.40...1.00
+    /// The look before the setting existed (the dark backdrop's alpha).
+    public static let defaultGlassOpacity = 0.74
+
+    public var glassOpacityValue: Double { Self.clampOpacity(glassOpacity ?? Self.defaultGlassOpacity) }
+
+    public static func clampOpacity(_ v: Double) -> Double {
+        v.isFinite ? min(max(v, glassOpacityRange.lowerBound), glassOpacityRange.upperBound) : defaultGlassOpacity
+    }
+
+    /// The backdrop tint's alpha for a setting: the value itself in dark mode; light mode stays a little more
+    /// opaque, as it always was (0.80 at the default).
+    public static func tintAlpha(_ v: Double, dark: Bool) -> Double {
+        let o = clampOpacity(v)
+        return dark ? o : min(1, o + 0.06)
+    }
+
+    /// How strongly the Mac's blur layer shows: full at the default and above; below it the blur itself fades
+    /// too (to 35 % at 40 %), because the system blur alone is nearly opaque. Text sits above it, untouched.
+    public static func blurAlpha(_ v: Double) -> Double {
+        let o = clampOpacity(v), lo = glassOpacityRange.lowerBound
+        if o >= defaultGlassOpacity { return 1 }
+        return 0.35 + (o - lo) / (defaultGlassOpacity - lo) * 0.65
+    }
 
     public static let retentionChoices = [0, 1, 10, 30, 60, 90]
     public static let limitChoices: [Double] = [0, 5, 10, 25, 50, 100]

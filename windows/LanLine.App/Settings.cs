@@ -32,6 +32,10 @@ sealed partial class MainWindow
     readonly TextBlock _unmanagedText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
     readonly TextBlock _setError = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
     readonly Button _setCancel = new() { Content = "Cancel" };
+    readonly Slider _opacity = new() { Minimum = StorageSettings.GlassOpacityMin, Maximum = StorageSettings.GlassOpacityMax, SmallChange = 0.01, LargeChange = 0.05, VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock _opacityText = new() { FontSize = 12, Width = 40, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+    readonly Button _opacityDefault = new() { Content = "Default", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+    bool _loadingOpacity;
 
     string SettingsPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "settings.json");
     string LogPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "received.json");
@@ -40,6 +44,8 @@ sealed partial class MainWindow
     void SetUpStorage()
     {
         _storage = StorageSettings.Load(SettingsPath);
+        Theme.GlassOpacity = _storage.GlassOpacityValue;
+        Theme.ApplyBackdrop(Application.Current.Resources);
         RunCleanup(manual: false);
         _cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
         _cleanupTimer.Tick += (_, _) => { RunCleanup(manual: false); _ = CheckForUpdates(manual: false); };
@@ -99,6 +105,11 @@ sealed partial class MainWindow
 
     void CloseSettings()
     {
+        if (Math.Abs(Theme.GlassOpacity - _storage.GlassOpacityValue) > 0.0001)   // undo a slider preview
+        {
+            Theme.GlassOpacity = _storage.GlassOpacityValue;
+            Theme.ApplyBackdrop(Application.Current.Resources);
+        }
         _showingSettings = false;
         ApplyScreen();
         if (_heightBeforeSettings is { } h && WindowState == WindowState.Normal && !_pairing)   // back to the size it had
@@ -115,6 +126,7 @@ sealed partial class MainWindow
         if (_settingsPanel != null) _settingsPanel.Visibility = _showingSettings ? Visibility.Visible : Visibility.Collapsed;
         _pairPanel.Visibility = !_showingSettings && _pairing ? Visibility.Visible : Visibility.Collapsed;
         _body.Visibility = _composer.Visibility = !_showingSettings && !_pairing ? Visibility.Visible : Visibility.Collapsed;
+        _stagedStrip.Visibility = _staged.Count > 0 && _composer.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         RefreshStatus();   // "To: …" follows the composer; without this it stayed under the Settings footer
     }
 
@@ -233,6 +245,30 @@ sealed partial class MainWindow
         var upNote = new TextBlock { Text = "Off unless you turn it on. Lan-Line then reads one small file from averywrobinson.com once a day. It sends no ID and nothing about your files.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
         upNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(upNote);
+
+        // Window opacity (beta.8): moves the glass backdrop live while dragging; Save keeps it, Cancel puts it back.
+        col.Children.Add(Label("Window opacity"));
+        _opacity.SetResourceReference(StyleProperty, "GlassSlider");
+        System.Windows.Automation.AutomationProperties.SetName(_opacity, "Window opacity");
+        _opacityText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        _opacityDefault.SetResourceReference(StyleProperty, "LinkButton");
+        _opacity.ValueChanged += (_, e) =>
+        {
+            _opacityText.Text = $"{Math.Round(e.NewValue * 100):0}%";
+            _opacityDefault.Visibility = Math.Abs(e.NewValue - StorageSettings.DefaultGlassOpacity) > 0.005 ? Visibility.Visible : Visibility.Hidden;
+            if (_loadingOpacity) return;
+            Theme.GlassOpacity = Math.Round(e.NewValue, 2);
+            Theme.ApplyBackdrop(Application.Current.Resources);
+        };
+        _opacityDefault.Click += (_, _) => _opacity.Value = StorageSettings.DefaultGlassOpacity;
+        var opRow = new DockPanel();
+        DockPanel.SetDock(_opacityDefault, Dock.Right); DockPanel.SetDock(_opacityText, Dock.Right);
+        opRow.Children.Add(_opacityDefault); opRow.Children.Add(_opacityText); opRow.Children.Add(_opacity);
+        col.Children.Add(opRow);
+        var opNote = new TextBlock { Text = Theme.GlassSupported ? "Changes only the smoked-glass background; text stays fully readable."
+                                                        : "Needs Windows 11 (22H2 or later), where the background is see-through.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        opNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(opNote);
         _setError.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
 
         var open = new Button { Content = "Open folder" };
@@ -369,6 +405,9 @@ sealed partial class MainWindow
         Select(_overPills, t => (string?)t == s.OverLimit);
         Select(_remindPills, t => t is bool b && b == s.TrashReminder);
         Select(_updatePills, t => t is bool u && u == (s.AutoUpdateCheck == true));
+        _loadingOpacity = true;
+        _opacity.Value = s.GlassOpacityValue;
+        _loadingOpacity = false;
         _setFirstRun.Visibility = _settingsFirstRun ? Visibility.Visible : Visibility.Collapsed;
         _setCancel.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
         _setError.Visibility = Visibility.Collapsed;
@@ -422,6 +461,8 @@ sealed partial class MainWindow
         if (Selected(_overPills) is string o) s.OverLimit = o;
         if (Selected(_remindPills) is bool b) s.TrashReminder = b;
         if (Selected(_updatePills) is bool u) s.AutoUpdateCheck = u;
+        var op = Math.Round(_opacity.Value, 2);
+        s.GlassOpacity = Math.Abs(op - StorageSettings.DefaultGlassOpacity) < 0.005 ? null : op;
         s.Confirmed = true;
         _setError.Visibility = Visibility.Collapsed;
         return s;

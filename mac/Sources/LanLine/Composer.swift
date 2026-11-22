@@ -12,6 +12,7 @@ struct Composer: View {
         let p = Palette.of(scheme)
         VStack(alignment: .trailing, spacing: 3) {
         if model.multi { TargetPicker(model: model).padding(.horizontal, 16) }
+        if !model.staged.isEmpty { StagedStrip(model: model).padding(.horizontal, 12) }
         HStack(alignment: .bottom, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 if model.draftEmpty {
@@ -31,11 +32,11 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 26, height: 26)
-                    .background(Circle().fill(model.draftEmpty ? p.sendIdle : p.accent))
+                    .background(Circle().fill(model.draftEmpty && model.staged.isEmpty ? p.sendIdle : p.accent))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(model.draftEmpty)
+            .disabled(model.draftEmpty && model.staged.isEmpty)
             .help("Send (Enter). Shift+Enter adds a line.")
             .accessibilityLabel("Send")
             .padding(.bottom, 3)
@@ -53,6 +54,45 @@ struct Composer: View {
         }
         .padding(.top, 6)
         .padding(.bottom, 12)
+    }
+}
+
+/// Items shared into Lan-Line from another app, waiting for Send. Each can be removed; nothing goes out until Send.
+struct StagedStrip: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let p = Palette.of(scheme)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ready to send. Press Send, or remove what you don't want.")
+                .font(.system(size: 10.5)).foregroundStyle(p.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.staged) { item in
+                        HStack(spacing: 5) {
+                            Image(systemName: icon(item)).font(.system(size: 10))
+                            Text(item.label).font(.system(size: 11)).lineLimit(1)
+                            Button { model.unstage(item.id) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+                                .buttonStyle(.plain).help("Don't send this").accessibilityLabel("Remove \(item.label)")
+                        }
+                        .foregroundStyle(p.text)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(p.cardFill).overlay(Capsule().strokeBorder(p.cardStroke, lineWidth: 1)))
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(model.staged.count) item\(model.staged.count == 1 ? "" : "s") ready to send")
+    }
+
+    private func icon(_ i: StagedItem) -> String {
+        switch i.kind {
+        case .text: return "text.alignleft"
+        case .path(let u):
+            var dir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: u.path, isDirectory: &dir) && dir.boolValue ? "folder" : "doc"
+        }
     }
 }
 

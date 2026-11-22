@@ -36,11 +36,12 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 - **Direct and local.** Machine to machine over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
 - **Several computers.** Pair up to 8 Macs and PCs. Send goes to everyone by default, or pick one computer next to Send; each message says who it came from or went to, with "✓ 2/3" until all have it. Settings → Paired computers lets you rename or forget one.
 - **Whole folders.** Drop a folder and it arrives as one item, subfolders and empty folders included, shown as one chip with its file count and size. Shortcuts (symlinks) are left out.
+- **Send from Finder or Explorer.** Mac: right-click → Share → Lan-Line. Windows: right-click → Send to → Lan-Line, or "Send with Lan-Line" under Show more options. Lan-Line opens with them ready to send; nothing goes out until you press Send.
 - **Too big? Said up front.** If the other computer doesn't have room, both windows say so straight away, before anything is sent.
 - **Encrypted end to end.** Everything between the two computers is encrypted (AES-256-GCM), with fresh keys for every connection. The pairing code and the long-term secret are never sent in the clear.
 - **Live status.** Emerald means connected; slate means waiting for the other computer.
 - **Storage you control.** Keep received files forever or for 1–90 days (or custom), set a storage limit with gentle warnings, and optionally move the oldest files to the Trash / Recycle Bin. Nothing is deleted unless you turn it on.
-- **Follows your theme.** Smoked glass in dark mode, a matching light look, on both systems.
+- **Follows your theme.** Smoked glass in dark mode, a matching light look, on both systems. Settings → Window opacity sets how see-through the glass is (40–100 %); text stays fully readable.
 
 ## Screenshots
 
@@ -58,14 +59,17 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.7-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
-| **Windows** | `Lan-Line-0.9.0-beta.7-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.8-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
+| **Windows** | `Lan-Line-0.9.0-beta.8-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
-Homebrew:
+Homebrew (Apple Silicon; Intel Macs use the DMG):
 
 ```bash
+brew trust averywrobinson/tap
 brew install --cask averywrobinson/tap/lan-line
 ```
+
+Homebrew 7 asks you to trust third-party taps; without it, `brew upgrade` may skip Lan-Line. Installing by full name works either way.
 
 **First open (beta builds aren't code-signed yet):**
 - **Mac:** macOS says it can't verify Lan-Line. Click *Done*, then open *System Settings → Privacy & Security* and click *Open Anyway*.
@@ -79,6 +83,8 @@ brew install --cask averywrobinson/tap/lan-line
 3. The dot turns green. Drop a file, paste a screenshot or type a message on either side, then copy it or drag it out on the other.
 
 Pairing again later: *Lan-Line → Pair with Another Computer…* on the Mac, or right-click the status line on Windows. Two Macs or two PCs pair the same way.
+
+Sending from Finder or Explorer: right-click → **Share → Lan-Line** (Mac) or **Send to → Lan-Line** (Windows). On a Mac where Lan-Line isn't in the Share menu, turn it on once in *System Settings → General → Login Items & Extensions → Sharing* (macOS 13–14: *Privacy & Security → Extensions → Sharing*).
 
 ## Keyboard
 

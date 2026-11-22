@@ -10,6 +10,7 @@ namespace LanLine.App;
 static class Program
 {
     [DllImport("kernel32.dll")] static extern bool AttachConsole(int pid);
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int pid);
 
     [STAThread]
     static int Main(string[] args)
@@ -23,10 +24,17 @@ static class Program
         Theme.Forced = Arg(args, "--theme") switch { "dark" => true, "light" => false, _ => null };
         Theme.Glass = snapshot == null && !args.Contains("--no-glass") && Theme.GlassSupported;
 
+        // Explorer's "Send to → Lan-Line" / "Send with Lan-Line" start Lan-Line.exe --stage PATH… (beta.8).
+        var stage = StageRequest.FromArgs(args);
+        var pipe = StageRequest.PipeName(System.Diagnostics.Process.GetCurrentProcess().SessionId);
+
         // One window per user: two PC instances would keep replacing each other at the Mac.
         using var single = new Mutex(true, snapshot == null ? @"Local\Lan-Line.SingleInstance" : @"Local\Lan-Line.Snapshot." + Environment.ProcessId, out var first);
         if (!first)
         {
+            // Hand the paths (or just "show yourself") to the running window, which may still be starting.
+            AllowSetForegroundWindow(-1);   // ASFW_ANY: let it come to the front
+            if (StageRequest.TrySend(pipe, stage ?? [], TimeSpan.FromSeconds(10))) return 0;
             MessageBox.Show("Lan-Line is already running.", "Lan-Line");
             return 0;
         }
@@ -41,13 +49,19 @@ static class Program
         else if (demoPair != null) w.DemoPair(demoPair);
         else if (args.Contains("--demo-multi")) Demo.Multi(w);
         else if (demo) Demo.Fill(w, empty: args.Contains("--empty"));
+        if (stage is { Count: > 0 } && snapshot != null) w.Stage(stage, show: false);   // screenshots of the chips
         if (snapshot != null)
         {
             if (Arg(args, "--snapshot-size")?.Split('x') is [var sw, var sh] && double.TryParse(sw, out var ww) && double.TryParse(sh, out var hh)) { w.Width = ww; w.Height = hh; }
             return Snapshot(w, snapshot);
         }
         Theme.Follow(app, w.ThemeChanged);
-        return app.Run(w);
+        using var stop = new CancellationTokenSource();
+        _ = StageRequest.Listen(pipe, paths => w.Dispatcher.BeginInvoke(() => w.Stage(paths)), stop.Token);
+        if (stage is { Count: > 0 }) w.Loaded += (_, _) => w.Stage(stage);
+        var code = app.Run(w);
+        stop.Cancel();
+        return code;
     }
 
     static string? Arg(string[] a, string f) { var i = Array.IndexOf(a, f); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }

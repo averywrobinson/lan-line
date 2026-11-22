@@ -26,6 +26,17 @@ public sealed class StorageSettings
     /// <summary>The newest version this computer heard of (update check or the other computer), and its page.</summary>
     [JsonPropertyName("latestVersion")] public string? LatestVersion { get; set; }
     [JsonPropertyName("latestURL")] public string? LatestUrl { get; set; }
+    /// <summary>How opaque the smoked-glass backdrop is, 0.40–1.00 (beta.8); null = the default look. Only the
+    /// backdrop changes; text, bubbles and chips keep their own colors. Same key and rules as the Mac.</summary>
+    [JsonPropertyName("glassOpacity")] public double? GlassOpacity { get; set; }
+
+    public const double GlassOpacityMin = 0.40, GlassOpacityMax = 1.00;
+    /// <summary>The look before the setting existed (the dark backdrop's alpha, #BD).</summary>
+    public const double DefaultGlassOpacity = 0.74;
+    [JsonIgnore] public double GlassOpacityValue => ClampOpacity(GlassOpacity ?? DefaultGlassOpacity);
+    public static double ClampOpacity(double v) => double.IsFinite(v) ? Math.Clamp(v, GlassOpacityMin, GlassOpacityMax) : DefaultGlassOpacity;
+    /// <summary>The backdrop tint's alpha: the value itself in dark mode; light stays a little more opaque (0.80 at the default).</summary>
+    public static double TintAlpha(double v, bool dark) { var o = ClampOpacity(v); return dark ? o : Math.Min(1, o + 0.06); }
 
     public static readonly int[] RetentionChoices = [0, 1, 10, 30, 60, 90];
     public static readonly double[] LimitChoices = [0, 5, 10, 25, 50, 100];
