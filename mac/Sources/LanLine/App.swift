@@ -9,6 +9,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let options: Options
     let model = AppModel()
     var panel: NSPanel!
+    private var menuBar: MenuBarItem!
 
     init(options: Options) { self.options = options }
 
@@ -20,6 +21,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         DebugLog.path = options.value("--debug-log")
         buildMenu()
+        menuBar = MenuBarItem(model: model, actions: .init(
+            show: { [weak self] in self?.showPanel(activate: true) },
+            pair: { [weak self] in self?.pairFromMenu() },
+            settings: { [weak self] in self?.settingsFromMenu() },
+            checkUpdates: { [weak self] in self?.checkFromMenu() }))
         model.glass = options.value("--snapshot") == nil && !options.flag("--no-glass")
         buildPanel()
         if let m = options.value("--demo-settings") { Demo.settings(model, firstRun: m == "first") }
@@ -30,7 +36,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.storage.glassOpacity = StorageSettings.clampOpacity(v)
             model.glassOpacity = model.storage.glassOpacityValue
         }
-        if let out = options.value("--snapshot") { snapshot(to: out) }
+        if let out = options.value("--snapshot") { snapshot(to: out) } else { applyKeepRunning() }
+        // Checks of the close / reopen path (beta.9): close the window after S seconds, show it again after T.
+        if let s = options.value("--test-close-after").flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + s) { [weak self] in self?.panel.performClose(nil) }
+        }
+        if let s = options.value("--test-reopen-after").flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + s) { [weak self] in self?.showPanel(activate: true) }
+        }
+    }
+
+    /// The menu bar icon is there while "Keep running in the menu bar" is on (beta.9).
+    private func applyKeepRunning() {
+        if model.storage.keepRunningWhenClosedValue { menuBar.show() } else { menuBar.hide() }
+        if !model.storage.keepRunningWhenClosedValue || panel.isVisible { NSApp.setActivationPolicy(.regular) }
     }
 
     /// `--snapshot PATH`: render the window (off-screen) to a PNG and quit. For design checks in both themes.
@@ -159,6 +178,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.settingsFirstRun = false
         restoreAfterSettings()
         runCleanup(manual: false)
+        applyKeepRunning()
     }
 
     /// Settings grew the window; put it back as it was (unless pairing still needs the room).
@@ -238,7 +258,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.setFrame(f, display: true, animate: true)
     }
 
-    @objc private func settingsFromMenu() { showPanel(activate: true); showSettings() }
+    @objc func settingsFromMenu() { showPanel(activate: true); showSettings() }
 
     private func boot() {
         model.myName = options.name
@@ -453,7 +473,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return nil
     }
 
-    @objc private func pairFromMenu() { showPanel(activate: true); beginPairing(.show) }
+    @objc func pairFromMenu() { showPanel(activate: true); beginPairing(.show) }
 
     // MARK: window
 
@@ -512,6 +532,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Something arrived: bring the window back even if it was minimized, hidden or closed.
     private func popUp() {
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }   // back in the Dock while shown
         if NSApp.isHidden { NSApp.unhideWithoutActivation() }
         if panel.isMiniaturized { panel.deminiaturize(nil) }
         panel.orderFrontRegardless()
@@ -523,7 +544,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        panel.orderOut(nil)   // closing hides; the Dock icon or a new item brings it back; ⌘Q quits
+        // Closing hides; ⌘Q quits. With "Keep running in the menu bar" on (the default) Lan-Line also leaves the
+        // Dock and stays in the menu bar; otherwise the Dock icon stays. Either brings it back, as does a new item.
+        panel.orderOut(nil)
+        if model.storage.keepRunningWhenClosedValue, menuBar.isShown { NSApp.setActivationPolicy(.accessory) }
         return false
     }
 

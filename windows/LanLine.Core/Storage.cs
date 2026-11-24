@@ -30,6 +30,13 @@ public sealed class StorageSettings
     /// backdrop changes; text, bubbles and chips keep their own colors. Same key and rules as the Mac.</summary>
     [JsonPropertyName("glassOpacity")] public double? GlassOpacity { get; set; }
 
+    /// <summary>Closing the window keeps Lan-Line running in the notification area (tray) and takes it off the
+    /// taskbar until the window is shown again (beta.9); null = never set = on. Same key as the Mac.</summary>
+    [JsonPropertyName("keepRunningWhenClosed")] public bool? KeepRunningWhenClosed { get; set; }
+    [JsonIgnore] public bool KeepRunningWhenClosedValue => KeepRunningWhenClosed ?? true;
+    /// <summary>The one-time "Lan-Line is still running" note was shown (Windows only).</summary>
+    [JsonPropertyName("trayHintShown")] public bool TrayHintShown { get; set; }
+
     public const double GlassOpacityMin = 0.40, GlassOpacityMax = 1.00;
     /// <summary>The look before the setting existed (the dark backdrop's alpha, #BD).</summary>
     public const double DefaultGlassOpacity = 0.74;

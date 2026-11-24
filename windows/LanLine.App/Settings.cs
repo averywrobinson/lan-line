@@ -23,7 +23,7 @@ sealed partial class MainWindow
 
     // panel parts
     readonly TextBlock _setFirstRun = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
-    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new(), _updatePills = new();
+    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new(), _updatePills = new(), _keepPills = new();
     readonly TextBox _customDays = new(), _customGB = new();
     Border _customDaysBox = null!, _customGBBox = null!;   // built in BuildSettingsPanel
     readonly StackPanel _overRow = new();
@@ -44,6 +44,7 @@ sealed partial class MainWindow
     void SetUpStorage()
     {
         _storage = StorageSettings.Load(SettingsPath);
+        ApplyKeepRunning();
         Theme.GlassOpacity = _storage.GlassOpacityValue;
         Theme.ApplyBackdrop(Application.Current.Resources);
         RunCleanup(manual: false);
@@ -246,6 +247,15 @@ sealed partial class MainWindow
         upNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(upNote);
 
+        // Keep running in the tray (beta.9)
+        col.Children.Add(Label("When I close the window"));
+        _keepPills.Children.Add(Pill("keep", "Keep running in the tray", true));
+        _keepPills.Children.Add(Pill("keep", "Quit Lan-Line", false));
+        col.Children.Add(_keepPills);
+        var keepNote = new TextBlock { Text = "In the tray, Lan-Line keeps receiving, off the taskbar. If Windows tucks the icon under ^ by the clock, drag it onto the taskbar to keep it in view.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        keepNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(keepNote);
+
         // Window opacity (beta.8): moves the glass backdrop live while dragging; Save keeps it, Cancel puts it back.
         col.Children.Add(Label("Window opacity"));
         _opacity.SetResourceReference(StyleProperty, "GlassSlider");
@@ -405,6 +415,7 @@ sealed partial class MainWindow
         Select(_overPills, t => (string?)t == s.OverLimit);
         Select(_remindPills, t => t is bool b && b == s.TrashReminder);
         Select(_updatePills, t => t is bool u && u == (s.AutoUpdateCheck == true));
+        Select(_keepPills, t => t is bool k && k == s.KeepRunningWhenClosedValue);
         _loadingOpacity = true;
         _opacity.Value = s.GlassOpacityValue;
         _loadingOpacity = false;
@@ -461,6 +472,7 @@ sealed partial class MainWindow
         if (Selected(_overPills) is string o) s.OverLimit = o;
         if (Selected(_remindPills) is bool b) s.TrashReminder = b;
         if (Selected(_updatePills) is bool u) s.AutoUpdateCheck = u;
+        if (Selected(_keepPills) is bool k) s.KeepRunningWhenClosed = k ? null : false;
         var op = Math.Round(_opacity.Value, 2);
         s.GlassOpacity = Math.Abs(op - StorageSettings.DefaultGlassOpacity) < 0.005 ? null : op;
         s.Confirmed = true;
@@ -473,11 +485,13 @@ sealed partial class MainWindow
     void SaveSettings(StorageSettings s)
     {
         s.LastUpdateCheck = _storage.LastUpdateCheck; s.LatestVersion = _storage.LatestVersion; s.LatestUrl = _storage.LatestUrl;
+        s.TrayHintShown = _storage.TrayHintShown;
         _storage = s;
         try { s.Save(SettingsPath); } catch (Exception e) { Note($"Couldn't save settings: {e.Message}"); }
         _settingsFirstRun = false;
         CloseSettings();
         RunCleanup(manual: false);
+        ApplyKeepRunning();
     }
 
     /// <summary>--demo-settings first|normal: the settings panel with sample usage (screenshots).</summary>

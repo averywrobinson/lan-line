@@ -33,6 +33,7 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 - **Paste screenshots straight in.** An image on the clipboard becomes a timestamped `pasted-….png` you can drag out on the other side.
 - **Copy and delivery checks.** Every message and file has a copy button and a ✓ once the other computer has it.
 - **Wakes on receive.** Minimize it; it pops back up when something arrives.
+- **Stays out of the way.** Close the window and Lan-Line keeps running in the Mac menu bar or the Windows notification area (tray), off the Dock and taskbar, still receiving. Settings can make closing quit instead.
 - **Direct and local.** Machine to machine over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
 - **Several computers.** Pair up to 8 Macs and PCs. Send goes to everyone by default, or pick one computer next to Send; each message says who it came from or went to, with "✓ 2/3" until all have it. Settings → Paired computers lets you rename or forget one.
 - **Whole folders.** Drop a folder and it arrives as one item, subfolders and empty folders included, shown as one chip with its file count and size. Shortcuts (symlinks) are left out.
@@ -59,8 +60,8 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.8-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
-| **Windows** | `Lan-Line-0.9.0-beta.8-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.9-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
+| **Windows** | `Lan-Line-0.9.0-beta.9-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew (Apple Silicon; Intel Macs use the DMG):
 
@@ -83,6 +84,8 @@ Homebrew 7 asks you to trust third-party taps; without it, `brew upgrade` may sk
 3. The dot turns green. Drop a file, paste a screenshot or type a message on either side, then copy it or drag it out on the other.
 
 Pairing again later: *Lan-Line → Pair with Another Computer…* on the Mac, or right-click the status line on Windows. Two Macs or two PCs pair the same way.
+
+Closed the window? On a Mac, Lan-Line is in the menu bar (two linked squares); on Windows, in the notification area by the clock (under ^ if Windows tucked it away: drag it onto the taskbar to keep it in view). Click it to show the window; Quit / Exit is in its menu.
 
 Sending from Finder or Explorer: right-click → **Share → Lan-Line** (Mac) or **Send to → Lan-Line** (Windows). On a Mac where Lan-Line isn't in the Share menu, turn it on once in *System Settings → General → Login Items & Extensions → Sharing* (macOS 13–14: *Privacy & Security → Extensions → Sharing*).
 

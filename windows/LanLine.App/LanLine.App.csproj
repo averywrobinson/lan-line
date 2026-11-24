@@ -3,6 +3,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Only for the tray icon (NotifyIcon, beta.9); its global usings would clash with WPF's names. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -14,9 +16,13 @@
     <StartupObject>LanLine.App.Program</StartupObject>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>0.9.0</Version>
-    <InformationalVersion>0.9.0-beta.8</InformationalVersion>
+    <InformationalVersion>0.9.0-beta.9</InformationalVersion>
     <Copyright>Lan-Line. MIT License.</Copyright>
   </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
   <ItemGroup>
     <Resource Include="LanLine.ico" />
   </ItemGroup>

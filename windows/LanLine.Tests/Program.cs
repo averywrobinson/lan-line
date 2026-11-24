@@ -50,7 +50,7 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("pairing: connected with old id after rename finishes", T.PbOldId), ("pairing: connected before peerDevice", T.PbConnectedFirst),
     ("pairing: late rekey reaches renamed partner", T.PbLateRekey), ("pairing: same computer again replaces it", T.PbRePair),
     ("pairing: legacy partner learns device id", T.PbLegacy), ("pairing through hubs with async delivery", T.PbHubs),
-    ("stage: args checked", T.StageArgs), ("stage: pipe hands paths over", T.StagePipe), ("glass opacity setting", T.GlassOpacity),
+    ("stage: args checked", T.StageArgs), ("stage: pipe hands paths over", T.StagePipe), ("glass opacity setting", T.GlassOpacity), ("keep running when closed setting", T.KeepRunning),
 };
 var filter = args.Length > 0 ? args[0] : null;
 int pass = 0, fail = 0;
@@ -1552,6 +1552,29 @@ static class T
             await server;
         }
         finally { cts.Cancel(); Directory.Delete(dir, true); }
+    }
+
+    public static Task KeepRunning()
+    {
+        var s = new StorageSettings();
+        H.Eq(null, s.KeepRunningWhenClosed, "unset by default");
+        H.True(s.KeepRunningWhenClosedValue, "on by default");
+        H.True(!s.TrayHintShown, "hint not shown yet");
+        var dir = Directory.CreateTempSubdirectory("ll-keep").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "settings.json");
+            File.WriteAllText(path, "{\"retentionDays\":30,\"confirmed\":true,\"glassOpacity\":0.5}");   // a beta.8 file
+            var old = StorageSettings.Load(path);
+            H.True(old.KeepRunningWhenClosedValue && old.GlassOpacity == 0.5, "old file loads as on");
+            old.KeepRunningWhenClosed = false; old.TrayHintShown = true; old.Save(path);
+            var back = StorageSettings.Load(path);
+            H.True(!back.KeepRunningWhenClosedValue && back.TrayHintShown, "saved and read back");
+            H.True(File.ReadAllText(path).Contains("\"keepRunningWhenClosed\": false"), "same key as the Mac");
+            H.True(old.Copy().KeepRunningWhenClosed == false && old.Copy().TrayHintShown, "copied with the other settings");
+        }
+        finally { Directory.Delete(dir, true); }
+        return Task.CompletedTask;
     }
 
     public static Task GlassOpacity()

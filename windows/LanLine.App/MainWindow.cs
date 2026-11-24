@@ -108,7 +108,7 @@ sealed partial class MainWindow : Window
         _pin.Click += (_, _) => { _pinned = !_pinned; ApplyPin(); };
         min.Click += (_, _) => WindowState = WindowState.Minimized;
         _max.Click += (_, _) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-        close.Click += (_, _) => Close();
+        close.Click += (_, _) => UserClose();
         _max.ToolTip = "Maximize";
         Automation(_pin, "Pin on top"); Automation(min, "Minimize"); Automation(_max, "Maximize"); Automation(close, "Close");
         var caption = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 6, 0) };
@@ -210,6 +210,9 @@ sealed partial class MainWindow : Window
         ApplyPin();
         RefreshStatus();
         RefreshEmpty();
+        Closing += OnClosing;          // close hides to the tray while "Keep running in the tray" is on (beta.9)
+        SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WatchCloseCommands);
+        Closed += (_, _) => RemoveTray();
         if (demo) return;
 
         _args = args;
@@ -259,6 +262,7 @@ sealed partial class MainWindow : Window
         _target.Visibility = Multi && !_pairing && _composer.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         System.Windows.Automation.AutomationProperties.SetName(_target, $"Send to {TargetLabel}");
         System.Windows.Automation.AutomationProperties.SetName(_status, $"Status: {_status.Text}");
+        RefreshTray();
     }
 
     /// <summary>"To: Everyone ⌄": Everyone (the default) or one paired computer.</summary>

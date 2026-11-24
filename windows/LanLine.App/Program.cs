@@ -55,6 +55,12 @@ static class Program
             if (Arg(args, "--snapshot-size")?.Split('x') is [var sw, var sh] && double.TryParse(sw, out var ww) && double.TryParse(sh, out var hh)) { w.Width = ww; w.Height = hh; }
             return Snapshot(w, snapshot);
         }
+        if (demo) w.DemoTray();
+        app.SessionEnding += (_, _) => w.PrepareToQuit();   // sign-out / shutdown: close for real, not to the tray
+        if (Arg(args, "--test-close-after") is { } tc && double.TryParse(tc, out var tcs))   // checks of the tray path (beta.9)
+            Delay(tcs, w.UserCloseForTest);
+        if (Arg(args, "--test-reopen-after") is { } tr && double.TryParse(tr, out var trs))
+            Delay(trs, w.ShowFromTrayForTest);
         Theme.Follow(app, w.ThemeChanged);
         using var stop = new CancellationTokenSource();
         _ = StageRequest.Listen(pipe, paths => w.Dispatcher.BeginInvoke(() => w.Stage(paths)), stop.Token);
@@ -62,6 +68,13 @@ static class Program
         var code = app.Run(w);
         stop.Cancel();
         return code;
+    }
+
+    static void Delay(double seconds, Action act)
+    {
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+        t.Tick += (_, _) => { t.Stop(); act(); };
+        t.Start();
     }
 
     static string? Arg(string[] a, string f) { var i = Array.IndexOf(a, f); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }

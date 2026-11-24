@@ -24,8 +24,13 @@ public struct StorageSettings: Codable, Sendable, Equatable {
     /// How opaque the smoked-glass backdrop is, 0.40–1.00 (beta.8). nil = the default look. Only the backdrop
     /// changes; text, bubbles and chips keep their own colors.
     public var glassOpacity: Double?
+    /// Closing the window keeps Lan-Line running in the menu bar (Mac) or the notification area (Windows), and
+    /// takes it out of the Dock / taskbar until the window is shown again (beta.9). nil = never set = on.
+    public var keepRunningWhenClosed: Bool?
 
     public init() {}
+
+    public var keepRunningWhenClosedValue: Bool { keepRunningWhenClosed ?? true }
 
     public static let glassOpacityRange: ClosedRange<Double> = 0.40...1.00
     /// The look before the setting existed (the dark backdrop's alpha).

@@ -1171,7 +1171,7 @@
 
           <!-- Download Buttons wired directly to GitHub Releases + interactive modal -->
           <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-8">
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.8/Lan-Line-0.9.0-beta.8-mac.dmg"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.9/Lan-Line-0.9.0-beta.9-mac.dmg"
                onclick="openDownloadModal('macOS')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-8px_rgba(248,250,252,0.2)] active:scale-[0.985] transition-all">
               <!-- Minimal Apple icon -->
@@ -1181,7 +1181,7 @@
               <span>Download for macOS</span>
             </a>
 
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.8/Lan-Line-0.9.0-beta.8-windows-setup.exe"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.9/Lan-Line-0.9.0-beta.9-windows-setup.exe"
                onclick="openDownloadModal('Windows')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#F8FAFC] bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.13] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] active:scale-[0.985] transition-all">
               <!-- Minimal Windows 4-pane grid icon -->
@@ -1263,7 +1263,7 @@
           <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Public beta</p>
           <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC]">Help test Lan-Line.</h2>
           <p class="text-[14.5px] leading-relaxed text-[#94A3B8] mt-4">Install it on a Mac and a Windows PC on the same network, use it for a few days, and tell us what breaks or feels off.</p>
-          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating:</span> from beta.4, update every computer (beta.5 and later encrypt everything and can’t talk to beta.4; the window says “Update Lan-Line on …”). beta.5 through beta.8 work together; folders need beta.6 or later on both ends, and pairing more than two computers needs beta.7 or later on the ones that pair with several. Your pairings carry over.</p>
+          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating:</span> from beta.4, update every computer (beta.5 and later encrypt everything and can’t talk to beta.4; the window says “Update Lan-Line on …”). beta.5 through beta.9 work together; folders need beta.6 or later on both ends, and pairing more than two computers needs beta.7 or later on the ones that pair with several. Your pairings carry over.</p>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-3">
@@ -1277,7 +1277,7 @@
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Minimize one window and send to it: it should pop back up without stealing your keyboard.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Storage settings: keep-for-days, the storage limit and “Clean up now”.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Light and dark mode, pin on top, and reconnecting after sleep or a network change.</span></li>
-              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>New in beta.8: Share → Lan-Line in Finder, Send to → Lan-Line in Explorer, and the Window opacity slider in Settings.</span></li>
+              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>New in beta.9: close the window and Lan-Line keeps running in the Mac menu bar or the Windows tray (notification area), still receiving. Since beta.8: Share → Lan-Line in Finder, Send to → Lan-Line in Explorer, and the Window opacity slider.</span></li>
             </ul>
           </div>
           <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-3">
@@ -1356,6 +1356,25 @@
               <div class="faq-inner px-6 pb-5">
                 <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
                   Yes, since beta.8. On a Mac, right-click files or folders → Share → Lan-Line. If Lan-Line isn’t listed, turn it on once in System Settings → General → Login Items &amp; Extensions → Sharing (on macOS 13 and 14: System Settings → Privacy &amp; Security → Extensions → Sharing). On Windows, right-click → Send to → Lan-Line, or “Send with Lan-Line” under Show more options. Either way Lan-Line opens with them ready to send; nothing goes out until you press Send.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
+            <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Where does Lan-Line go when I close it?</span>
+              <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
+            </button>
+            <div class="faq-content">
+              <div class="faq-inner px-6 pb-5">
+                <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
+                  Since beta.9 it keeps running and receiving. On a Mac it leaves the Dock and waits in the menu bar at the top of the screen: click its icon (two linked squares, joined while a computer is connected) to show the window, pair, open Settings or quit. On Windows it leaves the taskbar and waits in the notification area by the clock: click the icon to show the window, right-click it to exit. Windows may tuck new icons under ^; drag Lan-Line onto the taskbar to keep it in view. Anything that arrives still brings the window back. To quit on close instead, turn off “Keep running in the menu bar” (Mac) or pick “Quit Lan-Line” under “When I close the window” (Windows) in Settings.
                 </p>
               </div>
             </div>
@@ -1577,7 +1596,7 @@
         </div>
         <div>
           <h3 id="modalTitle" class="text-[16px] font-semibold text-[#F8FAFC]">Lan-Line for macOS</h3>
-          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.8 · macOS 13+ · Apple Silicon or Intel</p>
+          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.9 · macOS 13+ · Apple Silicon or Intel</p>
         </div>
       </div>
 
@@ -1598,7 +1617,7 @@
           <button type="button" id="copyReleaseUrlBtn" onclick="copyModalReleaseUrl()" class="font-mono text-[10.5px] text-sky-300 hover:text-sky-200">Copy URL</button>
         </div>
         <p id="modalReleaseUrl" class="font-mono text-[11px] text-[#CBD5E1] break-all leading-relaxed">
-          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.8/Lan-Line-0.9.0-beta.8-mac.dmg
+          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.9/Lan-Line-0.9.0-beta.9-mac.dmg
         </p>
         <p class="text-[11.5px] text-[#64748B] mt-1.5">
           <span id="modalFirstOpen">Beta builds aren’t code-signed yet; the first open asks for a one-time OK.</span>
@@ -2326,14 +2345,14 @@
       const INSTALLER_META = {
         macOS: {
           title: 'Lan-Line for macOS',
-          subtitle: 'v0.9.0-beta.8 · macOS 13+ · Apple Silicon or Intel · 2.9 MB DMG',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.8/Lan-Line-0.9.0-beta.8-mac.dmg',
+          subtitle: 'v0.9.0-beta.9 · macOS 13+ · Apple Silicon or Intel · 3.0 MB DMG',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.9/Lan-Line-0.9.0-beta.9-mac.dmg',
           firstOpen: 'Open the DMG and drag Lan-Line to Applications. First open: click Done, then System Settings → Privacy & Security → Open Anyway.',
         },
         Windows: {
           title: 'Lan-Line for Windows',
-          subtitle: 'v0.9.0-beta.8 · Windows 10/11 (x64) · 43 MB setup',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.8/Lan-Line-0.9.0-beta.8-windows-setup.exe',
+          subtitle: 'v0.9.0-beta.9 · Windows 10/11 (x64) · 49 MB setup',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.9/Lan-Line-0.9.0-beta.9-windows-setup.exe',
           firstOpen: 'Run the setup (no admin needed). If SmartScreen appears, choose More info → Run anyway.',
         },
       };

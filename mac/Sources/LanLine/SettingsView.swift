@@ -78,6 +78,16 @@ struct SettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(p.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle(isOn: Binding(get: { draft.keepRunningWhenClosedValue }, set: { draft.keepRunningWhenClosed = $0 ? nil : false })) {
+                    Text("Keep running in the menu bar when closed").font(.system(size: 12)).foregroundStyle(p.text)
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                Text(draft.keepRunningWhenClosedValue
+                     ? "Closing the window leaves Lan-Line in the menu bar, out of the Dock, still receiving. Quit from its menu or with ⌘Q."
+                     : "Closing the window keeps Lan-Line in the Dock, still receiving. Quit with ⌘Q.")
+                    .font(.system(size: 11)).foregroundStyle(p.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 OpacityRow(model: model, draft: $draft)
 
                 if model.unmanagedCount > 0 {
