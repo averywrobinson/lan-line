@@ -139,6 +139,15 @@ dotnet run --project windows/LanLine.App                 # the app
 
 Installer: `dotnet publish windows/LanLine.App -c Release -r win-x64 --self-contained true -o windows/publish-sc`, then `ISCC windows/installer/LanLine.iss` (Inno Setup 7).
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- **Who:** Avery Robinson ([@averywrobinson](https://github.com/averywrobinson)) is the author, reviewer and approver of every release. AI coding assistants help write the code; every change is reviewed, and only Avery approves a signing request.
+- **What gets signed:** only installers built by this repository's GitHub Actions workflow (`.github/workflows/windows-release.yml`) from a tagged commit of this public source. Windows signing starts once SignPath Foundation approves the project; until then the Windows installer is unsigned and SmartScreen warns about it.
+- **Privacy:** Lan-Line sends nothing to anyone but your own paired computers. It has no telemetry, accounts or analytics; the optional update check reads one small file (`version.json`) and sends no ID. See the README's privacy notes.
+- **MFA:** two-factor authentication is on for every account with access to this repository and to SignPath.
+
 ## Feedback
 
 Bugs and ideas are welcome in [Issues](https://github.com/averywrobinson/lan-line/issues/new/choose). Most helpful: both OS versions, the Lan-Line version, and your network setup (Wi-Fi, Ethernet, VPN, VLANs). Security problems: see [SECURITY.md](SECURITY.md).
