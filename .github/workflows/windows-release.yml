@@ -1,0 +1,57 @@
+# Builds, tests and packages Lan-Line for Windows from this public source, on GitHub-hosted runners only.
+# Release installers come from this workflow (see "Code signing policy" in the README): a version tag starts it,
+# and nothing built on a personal computer is published. The signing step is added once SignPath Foundation
+# approves the project; until then the artifact is the unsigned installer.
+name: windows-release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      # Actions are pinned to a commit, with the release it belongs to.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Test
+        shell: pwsh
+        run: |
+          dotnet build windows/LanLine.Tests -c Release -nologo
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          dotnet windows/LanLine.Tests/bin/Release/net10.0/LanLine.Tests.dll
+          if ($LASTEXITCODE -ne 0) { throw "tests failed" }
+      - name: Publish (self-contained, win-x64, no debug symbols)
+        shell: pwsh
+        run: |
+          dotnet publish windows/LanLine.App -c Release -r win-x64 --self-contained true -o windows/publish-sc -p:DebugType=none -p:DebugSymbols=false -nologo
+          if ($LASTEXITCODE -ne 0) { throw "publish failed" }
+      - name: Installer (Inno Setup 7.1.1, pinned and hash-checked)
+        shell: pwsh
+        run: |
+          $url  = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe"
+          $want = "8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0"
+          $exe  = Join-Path $env:RUNNER_TEMP "innosetup-7.1.1-x64.exe"
+          Invoke-WebRequest $url -OutFile $exe
+          $got = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $want) { throw "Inno Setup download does not match the pinned SHA-256: $got" }
+          $dir = Join-Path $env:RUNNER_TEMP "inno"
+          Start-Process $exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$dir" -Wait
+          & (Join-Path $dir "ISCC.exe") /Qp windows\installer\LanLine.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist\*.exe | ForEach-Object { "{0}  {1}  {2} bytes" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(), $_.Name, $_.Length }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lan-line-windows-unsigned
+          path: dist/*.exe
+          if-no-files-found: error
