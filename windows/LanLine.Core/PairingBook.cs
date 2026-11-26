@@ -84,6 +84,8 @@ public sealed class PairingBook(DeviceConfig config)
         HubEvent.Connected c => c with { Partner = Resolve(c.Partner) },
         HubEvent.Disconnected d => d with { Partner = Resolve(d.Partner) },
         HubEvent.Received r => r with { Partner = Resolve(r.Partner) },
+        HubEvent.Incoming inc => inc with { Partner = Resolve(inc.Partner) },
+        HubEvent.Clipboard cb => cb with { Partner = Resolve(cb.Partner) },
         HubEvent.ReceiveFailed f => f with { Partner = Resolve(f.Partner) },
         HubEvent.Status s => s.Partner.Length == 0 ? s : s with { Partner = Resolve(s.Partner) },
         HubEvent.Rekeyed rk => rk with { Partner = Resolve(rk.Partner) },

@@ -19,6 +19,10 @@ enum Headless {
         state.sendText = o.value("--send-text")
         state.sendFile = o.value("--send-file").map { URL(fileURLWithPath: $0) }
         state.sendFolder = o.value("--send-folder").map { URL(fileURLWithPath: $0) }
+        state.sendClip = o.value("--send-clip")
+        state.dropAt = o.value("--drop-at").flatMap(Double.init)   // beta.10 checks: cut the link once mid-file (resume)
+        state.cancelAt = o.value("--cancel-at").flatMap(Double.init)              // beta.10 checks: stop our own send at this fraction
+        state.stopIncomingAt = o.value("--stop-incoming-at").flatMap(Double.init) // … or refuse an incoming one
         state.withFolder = o.flag("--with-folder")   // selftest: also round-trip a test folder (needs a beta.6 peer)
         state.log("start", ["mode": o.flag("--selftest") ? "selftest" : (o.flag("--echo") ? "echo" : "headless"),
                             "downloads": downloads.path])
@@ -49,6 +53,11 @@ final class HeadlessState: @unchecked Sendable {
     var sendFile: URL?             // --send-file: same, for a file
     var sendFolder: URL?           // --send-folder: same, for a folder
     var withFolder = false, gotFolder = false
+    var cancelAt: Double?, stopIncomingAt: Double?
+    var sendClip: String?
+    var dropAt: Double?
+    private var dropped = false, loggedAfterDrop = false
+    private var cancelSent = false, stopSent = false
     var testFolder: URL?
     var testTree: [String: String] = [:]
     private var oneShot: Set<String> = []
@@ -119,6 +128,11 @@ final class HeadlessState: @unchecked Sendable {
         case .connected(let peer):
             connects += 1
             log("connected", ["peer": peer])
+            if let t = sendClip {   // beta.10 checks: one clipboard text, then exit when it went out
+                let c = ClipContent.text(t)
+                log("clip_fingerprint", ["fingerprint": ClipRules.fingerprint(c)])
+                session?.sendClip(c) { ok in self.log(ok ? "clip_sent" : "clip_not_sent"); exit(ok ? 0 : 1) }
+            }
             if !started, sendText != nil || sendFile != nil {
                 started = true
                 if let t = sendText, let id = session?.send(text: t).id { oneShot.insert(id) }
@@ -158,9 +172,28 @@ final class HeadlessState: @unchecked Sendable {
                 log("delivered", ["id": item.id])
                 if oneShot.remove(item.id) != nil, oneShot.isEmpty { log("sent_all"); exit(0) }
             case .failed(let why): log("send_failed", ["id": item.id, "why": why]); if selftest { finish(false, why) }
+            case .sending(let p):
+                if let at = dropAt, p >= at, !dropped { dropped = true; log("drop_link", ["at": p]); session?.dropLink() }
+                else if dropped, connects >= 2, !loggedAfterDrop { loggedAfterDrop = true; log("first_progress_after_reconnect", ["at": p]) }
+                if let at = cancelAt, p >= at, !cancelSent { cancelSent = true; log("cancel_sent", ["id": item.id, "at": p]); session?.cancel(item.id) }
+            case .cancelled:
+                log("cancelled", ["id": item.id])
+                if oneShot.remove(item.id) != nil, let s = session {   // then prove the link is still in step
+                    oneShot.insert(s.send(text: "after-cancel").id)
+                }
             default: break
             }
-        case .receiveFailed(let name, let r): log("receive_failed", ["name": name, "reason": r]); if selftest { finish(false, r) }
+        case .clipboard(let c):
+            switch c {
+            case .text(let t): log("clipboard_text", ["chars": t.count, "fingerprint": ClipRules.fingerprint(c)])
+            case .png(let d): log("clipboard_png", ["bytes": d.count, "fingerprint": ClipRules.fingerprint(c)])
+            }
+        case .incoming(let item):
+            log("incoming", ["id": item.id, "state": "\(item.state)"])
+            if case .receiving(let p) = item.state, let at = stopIncomingAt, p >= at, !stopSent {
+                stopSent = true; log("stop_incoming", ["id": item.id, "at": p]); session?.cancelIncoming(item.id)
+            }
+        case .receiveFailed(let name, let r, _): log("receive_failed", ["name": name, "reason": r]); if selftest { finish(false, r) }
         case .error(let s): log("error", ["message": s])
         case .status(let s): log("status", ["text": s])
         case .rekeyed: log("rekeyed", [:])

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using LanLine.Core;
@@ -23,7 +24,15 @@ sealed partial class MainWindow
 
     // panel parts
     readonly TextBlock _setFirstRun = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
-    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new(), _updatePills = new(), _keepPills = new();
+    readonly WrapPanel _retPills = new(), _limPills = new(), _overPills = new(), _remindPills = new(), _updatePills = new(), _keepPills = new(),
+        _notifyPills = new(), _popPills = new(), _signInPills = new(), _soundPills = new(), _historyPills = new(), _clipPills = new(), _clipPicPills = new(), _previewPills = new(), _edgePills = new();
+    // Global shortcuts (beta.10): recorders, what they hold until Save, and why one can't be used
+    Shortcut? _showKey, _sendKey;
+    readonly Button _showRec = new(), _sendRec = new(), _showOff = new(), _sendOff = new();
+    readonly TextBlock _showProblem = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed },
+                       _sendProblem = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed },
+                       _keysNote = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+    readonly StackPanel _notifyOff = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
     readonly TextBox _customDays = new(), _customGB = new();
     Border _customDaysBox = null!, _customGBBox = null!;   // built in BuildSettingsPanel
     readonly StackPanel _overRow = new();
@@ -39,14 +48,48 @@ sealed partial class MainWindow
 
     string SettingsPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "settings.json");
     string LogPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "received.json");
-    string DownloadsPath => Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir;
+    /// <summary>Where received files go: --downloads (tests), the folder chosen in Settings, or Downloads\Lan-Line.</summary>
+    string DownloadsPath => Arg(_args, "--downloads") ?? _storage.DownloadFolderValue ?? LanLineConfig.DownloadsDir;
+
+    /// <summary>The folder settings (beta.10): one folder, or one per computer inside it; applied to every partner.</summary>
+    void ApplyDownloads() => _hub?.SetDownloads(DownloadsPath, _storage.FolderPerComputerValue);
+
+    readonly ArrivalBurst _burst = new();
+
+    /// <summary>"When a file arrives" (beta.10): show it, or open it if it's a kind that can't run anything.</summary>
+    void AfterReceive(Item item)
+    {
+        var setting = _storage.AfterReceiveValue;
+        if (setting == LanLine.Core.AfterReceive.Nothing || !item.IsFile || item.Path is not { } p) return;
+        try
+        {
+            switch (_burst.Next(setting, item.FileName ?? p, item.IsFolder))   // at most 3 opened and Explorer shown once per burst of arrivals
+            {
+                case LanLine.Core.AfterReceive.Open:
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(p) { UseShellExecute = true });
+                    break;
+                case LanLine.Core.AfterReceive.Reveal:
+                    System.Diagnostics.Process.Start("explorer.exe", item.IsFolder ? $"\"{p}\"" : $"/select,\"{p}\"");
+                    break;
+            }
+        }
+        catch (Exception) { /* no app for it: the item is in the window anyway */ }
+    }
 
     void SetUpStorage()
     {
         _storage = StorageSettings.Load(SettingsPath);
+        // Welcome tour (beta.10): someone already paired before it existed isn't owed one.
+        if (Tour.SeenAtLaunch(_storage.TourSeen, _device.Peers.Count > 0) is var seen && seen != _storage.TourSeen)
+        {
+            _storage.TourSeen = seen;
+            try { _storage.Save(SettingsPath); } catch (Exception) { }
+        }
         ApplyKeepRunning();
         Theme.GlassOpacity = _storage.GlassOpacityValue;
         Theme.ApplyBackdrop(Application.Current.Resources);
+        ApplyTextScale();
+        WatchTextScale();
         RunCleanup(manual: false);
         _cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
         _cleanupTimer.Tick += (_, _) => { RunCleanup(manual: false); _ = CheckForUpdates(manual: false); };
@@ -146,7 +189,9 @@ sealed partial class MainWindow
         _usageBytes = existing.Sum(f => f.Size);
         // Files in the folder that Lan-Line doesn't manage (received before 0.9.0-beta.3, or put there by hand).
         var managed = existing.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var others = Directory.Exists(DownloadsPath)
+        // Only a folder Lan-Line owns is counted: a chosen folder like the Desktop holds plenty of other files.
+        var owned = Arg(_args, "--downloads") != null || _storage.DownloadFolderValue == null;
+        var others = owned && Directory.Exists(DownloadsPath)
             ? new DirectoryInfo(DownloadsPath).GetFiles().Where(f => !f.Name.StartsWith('.') && (f.Attributes & FileAttributes.Hidden) == 0 && !managed.Contains(f.FullName)).ToList()
             : [];
         _unmanagedText.Text = $"Also in the folder: {others.Count} file{(others.Count == 1 ? "" : "s")} ({Cleanup.FormatBytes(others.Sum(f => f.Length))}) from before this version or added by you. Lan-Line leaves these alone.";
@@ -197,14 +242,35 @@ sealed partial class MainWindow
         _customDaysBox = NumberBox(_customDays, "days", "Days to keep files");
         _customGBBox = NumberBox(_customGB, "GB", "Storage limit in GB");
         _customGB.TextChanged += (_, _) => RefreshUsageBar();
-        var col = new StackPanel { Margin = new Thickness(22, 16, 22, 16) };
-        col.Children.Add(_pairedBox);   // Paired computers (beta.7), filled when the panel opens
-        var title = new TextBlock { Text = "Storage for received files", FontSize = 15, FontWeight = FontWeights.SemiBold };
-        title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        // Design refresh (beta.10): titled groups on solid surfaces (readable at any window opacity), in the same order
+        // as the Mac: paired computers, received files, arrivals, shortcuts, clipboard and links, running, updates, look.
+        var outer = new StackPanel { Margin = new Thickness(12, 4, 12, 12) };
+        StackPanel col;
+        StackPanel Group(string title, out FrameworkElement box)
+        {
+            var head = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Margin = new Thickness(10, 12, 8, 5) };
+            head.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            System.Windows.Automation.AutomationProperties.SetHeadingLevel(head, System.Windows.Automation.AutomationHeadingLevel.Level2);
+            var inner = new StackPanel();
+            var card = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(12, 0, 12, 12), Child = inner };
+            card.SetResourceReference(Border.BackgroundProperty, "GroupFill");
+            card.SetResourceReference(Border.BorderBrushProperty, "GroupStroke");
+            var wrap = new StackPanel();
+            var headBack = Scrimmed(head);
+            head.Margin = new Thickness(0); headBack.Margin = new Thickness(4, 12, 8, 5); headBack.Padding = new Thickness(6, 1, 6, 2);
+            wrap.Children.Add(headBack); wrap.Children.Add(card);
+            outer.Children.Add(wrap);
+            box = wrap;
+            return inner;
+        }
+        col = Group("Paired computers", out _pairedGroup);
+        col.Children.Add(_pairedBox);   // filled when the panel opens
+        col = Group("Received files", out _);
         _setFirstRun.Text = "Choose how Lan-Line keeps received files before you start. You can change this any time from the status line's menu.";
         _setFirstRun.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
-        col.Children.Add(title);
+        _setFirstRun.Margin = new Thickness(0, 10, 0, 0);
         col.Children.Add(_setFirstRun);
+        BuildReceiveRows(col);
 
         col.Children.Add(Label("Delete received files after"));
         foreach (var d in StorageSettings.RetentionChoices) _retPills.Children.Add(Pill("ret", d == 0 ? "Never" : d == 1 ? "1 day" : $"{d} days", d));
@@ -239,13 +305,76 @@ sealed partial class MainWindow
         _unmanagedText.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(_unmanagedText);
 
-        col.Children.Add(Label("Check for updates automatically"));
-        _updatePills.Children.Add(Pill("updates", "Off", false));
-        _updatePills.Children.Add(Pill("updates", "Once a day", true));
-        col.Children.Add(_updatePills);
-        var upNote = new TextBlock { Text = "Off unless you turn it on. Lan-Line then reads one small file from averywrobinson.com once a day. It sends no ID and nothing about your files.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
-        upNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
-        col.Children.Add(upNote);
+        col = Group("When something arrives", out _);
+        // When something arrives (beta.10): a toast, and/or the window coming forward
+        col.Children.Add(Label("Notify me when something arrives"));
+        _notifyPills.Children.Add(Pill("notify", "On", true));
+        _notifyPills.Children.Add(Pill("notify", "Off", false));
+        col.Children.Add(_notifyPills);
+        var offText = new TextBlock { Text = "Notifications are off for Lan-Line in Windows Settings.", FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        offText.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
+        var openNs = new Button { Content = "Open Settings", FontSize = 12, Margin = new Thickness(8, 0, 0, 0) };
+        openNs.SetResourceReference(StyleProperty, "LinkButton");
+        openNs.Click += (_, _) => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:notifications") { UseShellExecute = true }); } catch (Exception) { } };
+        _notifyOff.Children.Add(offText); _notifyOff.Children.Add(openNs);
+        col.Children.Add(_notifyOff);
+        col.Children.Add(Label("Bring the window forward when something arrives"));
+        _popPills.Children.Add(Pill("popup", "Yes", true));
+        _popPills.Children.Add(Pill("popup", "No", false));
+        col.Children.Add(_popPills);
+        col.Children.Add(Label("Play sounds"));
+        _soundPills.Children.Add(Pill("sounds", "On", true));
+        _soundPills.Children.Add(Pill("sounds", "Off", false));
+        _soundPills.ToolTip = "A soft chime when something arrives while you're in Lan-Line, and a quiet tick when you send";
+        col.Children.Add(_soundPills);
+        var notifyNote = new TextBlock { Text = "Notifications appear only while you're using another window, with Copy for texts and Open or Show in folder for files. Do not disturb and Focus follow Windows Settings.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        notifyNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(notifyNote);
+        col = Group("Keyboard shortcuts, from any app", out _);
+        BuildShortcutRows(col);
+
+        col = Group("Clipboard and links", out _);
+        // Clipboard sharing (beta.10): off until turned on
+        col.Children.Add(Label("Share the clipboard"));
+        _clipPills.Children.Add(Pill("clip", "Off", false));
+        _clipPills.Children.Add(Pill("clip", "On", true));
+        col.Children.Add(_clipPills);
+        var picLabel = Label("Include pictures (up to 10 MB)");
+        col.Children.Add(picLabel);
+        _clipPicPills.Children.Add(Pill("clippic", "On", true));
+        _clipPicPills.Children.Add(Pill("clippic", "Off", false));
+        col.Children.Add(_clipPicPills);
+        var clipNote = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        clipNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(clipNote);
+        void ClipRefresh()
+        {
+            var on = Selected(_clipPills) is true;
+            picLabel.Visibility = _clipPicPills.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            clipNote.Text = on ? "Copy on one computer, paste on the other, while they're connected. Copies from password managers are never shared, and nothing is kept. Pause it any time from the tray icon."
+                               : "Off: copying stays on this PC. Turn it on here and on the other computer.";
+        }
+        foreach (var r in _clipPills.Children.OfType<System.Windows.Controls.RadioButton>()) r.Checked += (_, _) => ClipRefresh();
+        _clipRefresh = ClipRefresh;
+
+        // Link previews (beta.10): off unless turned on (fetching a page tells that website)
+        col.Children.Add(Label("Show link previews"));
+        _previewPills.Children.Add(Pill("previews", "Off", false));
+        _previewPills.Children.Add(Pill("previews", "On", true));
+        col.Children.Add(_previewPills);
+        var prevNote = new TextBlock { Text = "On: a shared link shows its page's title and picture, fetched from that website (which can see the visit). Off: links show their site and path, and nothing is fetched until you open one.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        prevNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(prevNote);
+
+        col = Group("Running", out _);
+        // Open at sign-in (beta.10): the Run value, read from the registry each time the panel opens
+        col.Children.Add(Label("Open Lan-Line when I sign in"));
+        _signInPills.Children.Add(Pill("signin", "On", true));
+        _signInPills.Children.Add(Pill("signin", "Off", false));
+        col.Children.Add(_signInPills);
+        var signNote = new TextBlock { Text = "At sign-in it waits in the tray, still receiving, and opens when something arrives.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        signNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(signNote);
 
         // Keep running in the tray (beta.9)
         col.Children.Add(Label("When I close the window"));
@@ -256,6 +385,49 @@ sealed partial class MainWindow
         keepNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         col.Children.Add(keepNote);
 
+        // Edge drop zone (beta.10): the tray takes no drops, so an optional strip at the screen edge does
+        col.Children.Add(Label("Drop zone at the screen edge"));
+        _edgePills.Children.Add(Pill("edge", "Off", false));
+        _edgePills.Children.Add(Pill("edge", "On", true));
+        col.Children.Add(_edgePills);
+        var edgeNote = new TextBlock { Text = "A slim strip at the right edge of the screen. Drag files, a folder or text onto it to send them without opening Lan-Line (the notification area by the clock can't take drops).", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        edgeNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(edgeNote);
+
+        col = Group("Updates and history", out _);
+        col.Children.Add(Label("Check for updates automatically"));
+        _updatePills.Children.Add(Pill("updates", "Off", false));
+        _updatePills.Children.Add(Pill("updates", "Once a day", true));
+        col.Children.Add(_updatePills);
+        var upNote = new TextBlock { Text = "Off unless you turn it on. Lan-Line then reads one small file from averywrobinson.com once a day. It sends no ID and nothing about your files.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        upNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(upNote);
+
+        // History (beta.10): kept on this PC only, searchable with Ctrl+F
+        col.Children.Add(Label("Keep history on this PC"));
+        _historyPills.Children.Add(Pill("history", "On", true));
+        _historyPills.Children.Add(Pill("history", "Off", false));
+        var clearHist = new Button { Content = "Clear history…", FontSize = 12, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        clearHist.SetResourceReference(StyleProperty, "LinkButton");
+        clearHist.Click += (_, _) =>
+        {
+            if (MessageBox.Show(this, "Clear the history on this PC? Texts and file names are removed from Lan-Line. Received files stay in your Lan-Line folder.",
+                                "Lan-Line", MessageBoxButton.OKCancel, MessageBoxImage.None, MessageBoxResult.Cancel) == MessageBoxResult.OK) ClearHistory();
+        };
+        _historyPills.Children.Add(clearHist);
+        col.Children.Add(_historyPills);
+        var histNote = new TextBlock { Text = $"The last {History.Cap:N0} texts and file names stay in the window and in search (Ctrl+F), on this PC only. Turning it off deletes it.", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        histNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(histNote);
+
+        col = Group("Appearance", out _);
+        // Text size (accessibility pass, beta.10): Lan-Line's own, on top of Windows' Text size setting
+        col.Children.Add(Label("Text size"));
+        foreach (var c in StorageSettings.TextScaleChoices) _textPills.Children.Add(Pill("textsize", $"{c * 100:0}%", c));
+        col.Children.Add(_textPills);
+        var textNote = new TextBlock { Text = "Changes when you save. Lan-Line also follows Windows' own Text size (Settings › Accessibility › Text size).", FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+        textNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(textNote);
         // Window opacity (beta.8): moves the glass backdrop live while dragging; Save keeps it, Cancel puts it back.
         col.Children.Add(Label("Window opacity"));
         _opacity.SetResourceReference(StyleProperty, "GlassSlider");
@@ -295,18 +467,20 @@ sealed partial class MainWindow
         var buttons = new DockPanel { Margin = new Thickness(0, 8, 0, 0), LastChildFill = false };
         DockPanel.SetDock(save, Dock.Right); DockPanel.SetDock(_setCancel, Dock.Right);
         buttons.Children.Add(open); buttons.Children.Add(clean); buttons.Children.Add(save); buttons.Children.Add(_setCancel);
-        foreach (var w in new[] { _retPills, _limPills }) foreach (RadioButton r in w.Children) r.Checked += (_, _) => RefreshCustomBoxes();
+        foreach (var w in new[] { _retPills, _limPills }) foreach (var r in w.Children.OfType<RadioButton>()) r.Checked += (_, _) => RefreshCustomBoxes();
         // Pinned bar: the error line and Save never scroll out of view.
-        var bar = new StackPanel { Margin = new Thickness(22, 4, 22, 14) };
+        var bar = new StackPanel { Margin = new Thickness(14, 2, 14, 12) };
         _setError.Margin = new Thickness(0, 6, 0, 0);
         bar.Children.Add(_setError);
         bar.Children.Add(buttons);
-        var barBorder = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Child = bar };
-        barBorder.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        var barBorder = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Child = bar };   // a solid layer: Save is always readable
+        barBorder.SetResourceReference(Border.BorderBrushProperty, "GroupStroke");
+        barBorder.SetResourceReference(Border.BackgroundProperty, "GroupFill");
         var dock = new DockPanel();
         DockPanel.SetDock(barBorder, Dock.Bottom);
         dock.Children.Add(barBorder);
-        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col });
+        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = outer });
+        NamePillGroups(outer);   // Narrator: "Play sounds: Off", not just "Off"
         return dock;
     }
 
@@ -342,21 +516,32 @@ sealed partial class MainWindow
 
     static void Select(WrapPanel w, Func<object?, bool> match)
     {
-        foreach (RadioButton r in w.Children) r.IsChecked = match(r.Tag);
+        foreach (var r in w.Children.OfType<RadioButton>()) r.IsChecked = match(r.Tag);   // a row may also hold a button (Clear history)
+    }
+
+    static bool IsWritable(string dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var probe = Path.Combine(dir, $".lan-line-{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(probe, ""); File.Delete(probe);
+            return true;
+        }
+        catch (Exception) { return false; }
     }
 
     static object? Selected(WrapPanel w) => w.Children.OfType<RadioButton>().FirstOrDefault(r => r.IsChecked == true)?.Tag;
 
-    readonly StackPanel _pairedBox = new() { Margin = new Thickness(0, 0, 0, 14) };
+    readonly StackPanel _pairedBox = new() { Margin = new Thickness(0, 10, 0, 0) };
+    FrameworkElement _pairedGroup = new Border();
+    readonly WrapPanel _textPills = new();
 
     /// <summary>Settings → Paired computers: rename, forget (with a warning), pair another.</summary>
     void RefreshPairedList()
     {
         _pairedBox.Children.Clear();
-        _pairedBox.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
-        var head = new TextBlock { Text = "Paired computers", FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) };
-        head.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-        _pairedBox.Children.Add(head);
+        _pairedGroup.Visibility = _settingsFirstRun ? Visibility.Collapsed : Visibility.Visible;
         if (_partners.Count == 0)
         {
             var none = new TextBlock { Text = "None yet.", FontSize = 12 };
@@ -395,7 +580,7 @@ sealed partial class MainWindow
             row.Children.Add(dot); row.Children.Add(forget); row.Children.Add(rename); row.Children.Add(name);
             _pairedBox.Children.Add(row);
         }
-        var another = new Button { Content = "Pair another computer…", FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0),
+        var another = new Button { Content = _partners.Count == 0 ? "Pair a computer…" : "Pair another computer…", FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0),
                                    IsEnabled = _partners.Count < DeviceConfig.MaxPartners };
         another.SetResourceReference(StyleProperty, "LinkButton");
         another.Click += (_, _) => { CloseSettings(); BeginPairing(show: false); };
@@ -416,6 +601,24 @@ sealed partial class MainWindow
         Select(_remindPills, t => t is bool b && b == s.TrashReminder);
         Select(_updatePills, t => t is bool u && u == (s.AutoUpdateCheck == true));
         Select(_keepPills, t => t is bool k && k == s.KeepRunningWhenClosedValue);
+        Select(_notifyPills, t => t is bool n && n == s.NotifyOnArrivalValue);
+        Select(_popPills, t => t is bool p && p == s.PopUpOnArrivalValue);
+        Select(_soundPills, t => t is bool so && so == s.SoundsValue);
+        Select(_historyPills, t => t is bool hi && hi == s.KeepHistoryValue);
+        Select(_clipPills, t => t is bool cl && cl == s.ShareClipboardValue);
+        _folderDraft = s.DownloadFolderValue;
+        Select(_perComputerPills, t => t is bool pc && pc == s.FolderPerComputerValue);
+        Select(_afterPills, t => t is LanLine.Core.AfterReceive ar && ar == s.AfterReceiveValue);
+        RefreshReceiveRows();
+        Select(_clipPicPills, t => t is bool cp && cp == s.ShareClipboardPicturesValue);
+        Select(_previewPills, t => t is bool lp && lp == s.LinkPreviewsValue);
+        Select(_edgePills, t => t is bool ed && ed == s.EdgeDropZoneValue);
+        _clipRefresh?.Invoke();
+        Select(_signInPills, t => t is bool si && si == (!_demo && OpensAtSignIn()));
+        _notifyOff.Visibility = !_demo && s.NotifyOnArrivalValue && WinToast.Enabled() == false ? Visibility.Visible : Visibility.Collapsed;
+        _showKey = s.ShowShortcut; _sendKey = s.SendShortcut;
+        RefreshShortcutRows();
+        Select(_textPills, t => t is double ts && Math.Abs(ts - s.TextScaleValue) < 0.001);
         _loadingOpacity = true;
         _opacity.Value = s.GlassOpacityValue;
         _loadingOpacity = false;
@@ -473,8 +676,25 @@ sealed partial class MainWindow
         if (Selected(_remindPills) is bool b) s.TrashReminder = b;
         if (Selected(_updatePills) is bool u) s.AutoUpdateCheck = u;
         if (Selected(_keepPills) is bool k) s.KeepRunningWhenClosed = k ? null : false;
+        if (Selected(_notifyPills) is bool nt) s.NotifyOnArrival = nt ? null : false;
+        if (Selected(_popPills) is bool pu) s.PopUpOnArrival = pu ? null : false;
+        if (Selected(_soundPills) is bool snd) s.Sounds = snd ? null : false;
+        if (Selected(_historyPills) is bool hk) s.KeepHistory = hk ? null : false;
+        if (Selected(_clipPills) is bool cs) s.ShareClipboard = cs ? true : null;
+        if (_folderDraft != null && !IsWritable(_folderDraft)) return Fail("Lan-Line can't save files in that folder. Choose another one.");
+        s.DownloadFolder = _folderDraft;
+        if (Selected(_perComputerPills) is bool pcs) s.FolderPerComputer = pcs ? true : null;
+        if (Selected(_afterPills) is LanLine.Core.AfterReceive arv) s.AfterReceive = arv == LanLine.Core.AfterReceive.Nothing ? null : ReceiveOptions.Key(arv);
+        if (Selected(_clipPicPills) is bool cpp) s.ShareClipboardPictures = cpp ? null : false;
+        if (Selected(_previewPills) is bool lpv) s.LinkPreviews = lpv ? true : null;
+        if (Selected(_edgePills) is bool edv) s.EdgeDropZone = edv ? true : null;
+        if (_showKey != null && _showKey == _sendKey) return Fail("Pick two different keyboard shortcuts.");
+        if ((_showKey?.Problem(mac: false) ?? _sendKey?.Problem(mac: false)) is { } kp) return Fail(kp);
+        s.ShortcutShow = _showKey == Shortcut.DefaultShow ? null : _showKey?.Text ?? "";
+        s.ShortcutSend = _sendKey?.Text;
         var op = Math.Round(_opacity.Value, 2);
         s.GlassOpacity = Math.Abs(op - StorageSettings.DefaultGlassOpacity) < 0.005 ? null : op;
+        s.TextScale = Selected(_textPills) is double ts && Math.Abs(ts - 1) > 0.001 ? ts : null;
         s.Confirmed = true;
         _setError.Visibility = Visibility.Collapsed;
         return s;
@@ -482,21 +702,182 @@ sealed partial class MainWindow
         StorageSettings? Fail(string msg) { _setError.Text = msg; _setError.Visibility = Visibility.Visible; return null; }
     }
 
+    /// <summary>"Keyboard shortcuts, from any app": a recorder per shortcut (click, press the keys; Esc cancels,
+    /// Delete turns it off) and a × to turn it off.</summary>
+    void BuildShortcutRows(StackPanel col)
+    {
+        foreach (var (rec, off, problem, label, isShow) in new[] { (_showRec, _showOff, _showProblem, "Show or hide Lan-Line", true), (_sendRec, _sendOff, _sendProblem, "Send the clipboard", false) })
+        {
+            var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+            var text = new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+            off.Content = Glyph_Close; off.FontFamily = (System.Windows.Media.FontFamily)Application.Current.Resources["IconFont"];
+            off.FontSize = 9; off.ToolTip = "Turn off"; off.Margin = new Thickness(6, 0, 0, 0);
+            off.SetResourceReference(StyleProperty, "IconButton");
+            Automation(off, $"Turn off: {label}");
+            off.Click += (_, _) => { if (isShow) _showKey = null; else _sendKey = null; RefreshShortcutRows(); };
+            rec.MinWidth = 130;
+            rec.SetResourceReference(StyleProperty, "SecondaryButton");
+            Automation(rec, $"Shortcut: {label}");
+            rec.Click += (_, _) => StartRecording(rec);
+            rec.PreviewKeyDown += (_, e) => RecordKey(e, isShow);
+            rec.LostKeyboardFocus += (_, _) => { if (_recordingShortcut) StopRecording(); };
+            DockPanel.SetDock(off, Dock.Right); DockPanel.SetDock(rec, Dock.Right);
+            row.Children.Add(off); row.Children.Add(rec); row.Children.Add(text);
+            col.Children.Add(row);
+            problem.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
+            col.Children.Add(problem);
+        }
+        _keysNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(_keysNote);
+    }
+
+    Button? _recording;
+    Action? _clipRefresh;
+
+    void StartRecording(Button rec)
+    {
+        _recording = rec;
+        _recordingShortcut = true;
+        ApplyHotKeys();   // the current global shortcuts would fire instead of being recorded
+        rec.Content = "Type a shortcut…";
+        rec.Focus();
+    }
+
+    void StopRecording()
+    {
+        _recording = null;
+        _recordingShortcut = false;
+        ApplyHotKeys();
+        RefreshShortcutRows();
+    }
+
+    void RecordKey(KeyEventArgs e, bool isShow)
+    {
+        if (!_recordingShortcut) return;
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+        if (key == Key.Escape) { StopRecording(); return; }
+        if (key is Key.Delete or Key.Back) { if (isShow) _showKey = null; else _sendKey = null; StopRecording(); return; }
+        string? name = key switch
+        {
+            >= Key.A and <= Key.Z => key.ToString(),
+            >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
+            Key.Space => "Space",
+            >= Key.F1 and <= Key.F12 => key.ToString(),
+            _ => null,
+        };
+        if (name == null) return;
+        var m = Keyboard.Modifiers;
+        var s = new Shortcut(m.HasFlag(ModifierKeys.Control), m.HasFlag(ModifierKeys.Alt), m.HasFlag(ModifierKeys.Shift), false, name);
+        if (isShow) _showKey = s; else _sendKey = s;
+        StopRecording();
+    }
+
+    void RefreshShortcutRows()
+    {
+        if (_recording == null)
+        {
+            _showRec.Content = _showKey?.Display(false) ?? "Off";
+            _sendRec.Content = _sendKey?.Display(false) ?? "Off";
+        }
+        // the space stays, so both fields line up
+        _showOff.Visibility = _showKey == null ? Visibility.Hidden : Visibility.Visible;
+        _sendOff.Visibility = _sendKey == null ? Visibility.Hidden : Visibility.Visible;
+        Show(_showProblem, _showKey?.Problem(false) ?? (_showKey == _storage.ShowShortcut && _hotKeyProblems.TryGetValue("show", out var a) ? a : null));
+        Show(_sendProblem, _sendKey?.Problem(false) ?? (_sendKey == _storage.SendShortcut && _hotKeyProblems.TryGetValue("send", out var b) ? b : null)
+                           ?? (_sendKey != null && _sendKey == _showKey ? "Pick two different shortcuts." : null));
+        var to = _sendTarget is { } t ? NameOf(t) : Multi ? "everyone" : PeerLabel;
+        _keysNote.Text = _sendKey == null
+            ? $"Send the clipboard is off. Try {Shortcut.SuggestedSend.Display(false)} (or Ctrl+Alt+Shift+V if you use Paste Special in Office): it sends copied text, a picture or files to {to} without opening the window."
+            : "Sends copied text, a picture or files without opening the window. All shortcuts: Ctrl+/.";
+
+        static void Show(TextBlock tb, string? why) { tb.Text = why ?? ""; tb.Visibility = why == null ? Visibility.Collapsed : Visibility.Visible; }
+    }
+
+    // ---------- where received files go, and what happens when one arrives (beta.10)
+
+    readonly WrapPanel _folderPills = new(), _perComputerPills = new(), _afterPills = new();
+    readonly TextBlock _folderPath = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) },
+                       _afterNote = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+    string? _folderDraft;   // null = Downloads\Lan-Line
+    static string DesktopPath => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+
+    void BuildReceiveRows(StackPanel col)
+    {
+        col.Children.Add(Label("Save received files in"));
+        _folderPills.Children.Add(Pill("folder", "Downloads\\Lan-Line", "default"));
+        _folderPills.Children.Add(Pill("folder", "Desktop", "desktop"));
+        _folderPills.Children.Add(Pill("folder", "Choose a folder…", "custom"));
+        foreach (var r in _folderPills.Children.OfType<RadioButton>())
+            r.Click += (_, _) =>
+            {
+                switch (r.Tag as string)
+                {
+                    case "default": _folderDraft = null; break;
+                    case "desktop": _folderDraft = DesktopPath; break;
+                    default:
+                        var d = new Microsoft.Win32.OpenFolderDialog { Title = "Received files will be saved here", InitialDirectory = _folderDraft ?? LanLineConfig.DownloadsDir };
+                        if (d.ShowDialog(this) == true) _folderDraft = d.FolderName;
+                        break;
+                }
+                RefreshReceiveRows();
+            };
+        col.Children.Add(_folderPills);
+        _folderPath.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(_folderPath);
+        col.Children.Add(Label("A folder for each computer"));
+        _perComputerPills.Children.Add(Pill("percomputer", "Off", false));
+        _perComputerPills.Children.Add(Pill("percomputer", "On", true));
+        col.Children.Add(_perComputerPills);
+        col.Children.Add(Label("When a file arrives"));
+        _afterPills.Children.Add(Pill("after", "Do nothing", LanLine.Core.AfterReceive.Nothing));
+        _afterPills.Children.Add(Pill("after", "Show in folder", LanLine.Core.AfterReceive.Reveal));
+        _afterPills.Children.Add(Pill("after", "Open it", LanLine.Core.AfterReceive.Open));
+        foreach (var r in _afterPills.Children.OfType<RadioButton>()) r.Checked += (_, _) => RefreshReceiveRows();
+        col.Children.Add(_afterPills);
+        _afterNote.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        col.Children.Add(_afterNote);
+    }
+
+    void RefreshReceiveRows()
+    {
+        var tag = _folderDraft == null ? "default" : string.Equals(_folderDraft, DesktopPath, StringComparison.OrdinalIgnoreCase) ? "desktop" : "custom";
+        Select(_folderPills, t => (string?)t == tag);
+        _folderPath.Text = _folderDraft ?? (_demoSettings ? @"C:\Users\you\Downloads\Lan-Line" : LanLineConfig.DownloadsDir);   // screenshots never show the real user name
+        _afterNote.Text = Selected(_afterPills) is LanLine.Core.AfterReceive.Open
+            ? "Opens pictures, PDFs, text and media (up to 3 at a time). Apps, scripts, installers and archives are shown in their folder instead."
+            : "Files save as soon as they arrive: pairing is what makes a computer trusted.";
+    }
+
     void SaveSettings(StorageSettings s)
     {
+        if (!_demo && Selected(_signInPills) is bool signIn && signIn != OpensAtSignIn()) SetOpenAtSignIn(signIn);
         s.LastUpdateCheck = _storage.LastUpdateCheck; s.LatestVersion = _storage.LatestVersion; s.LatestUrl = _storage.LatestUrl;
         s.TrayHintShown = _storage.TrayHintShown;
+        s.TourSeen = _storage.TourSeen;
         _storage = s;
+        ApplyTextScale();
         try { s.Save(SettingsPath); } catch (Exception e) { Note($"Couldn't save settings: {e.Message}"); }
         _settingsFirstRun = false;
         CloseSettings();
+        MaybeShowTour();   // a new install: pairing and these settings are done, so say hello
         RunCleanup(manual: false);
         ApplyKeepRunning();
+        ApplyHotKeys();
+        ApplyHistory();
+        ApplyClipboardShare();
+        ApplyDownloads();
+        ApplyEdgeDrop();
     }
 
     /// <summary>--demo-settings first|normal: the settings panel with sample usage (screenshots).</summary>
+    bool _demoSettings;
+
     internal void DemoSettings(bool firstRun)
     {
+        _demoSettings = true;
         _storage = new StorageSettings();
         if (!firstRun) { _storage.RetentionDays = 30; _storage.OverLimit = "trash"; _storage.Confirmed = true; }
         _settingsFirstRun = firstRun;

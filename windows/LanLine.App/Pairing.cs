@@ -49,6 +49,9 @@ sealed partial class MainWindow
         StartHub();
         if (_device.Peers.Count == 0) BeginPairing(show: false);   // a PC types the code by default; it can switch
         SetUpStorage();
+        ApplyHistory();
+        ApplyDownloads();
+        ApplyEdgeDrop();
     }
 
     /// <summary>One Hub for all partners: it listens for those that dial us, dials those we dial, answers discovery.</summary>
@@ -155,6 +158,7 @@ sealed partial class MainWindow
         if (i >= 0) _partners[i] = _partners[i] with { Name = p.Name, Up = true }; else _partners.Add(new PartnerInfo(p.Id, p.Name, true));
         _pairBusy = false;
         SetPairing(false);
+        MaybeShowTour();
         if (Multi) Note($"Paired with {p.Name}. Send goes to everyone; pick one computer above the message box.", 10);
     }
 
@@ -163,6 +167,7 @@ sealed partial class MainWindow
         name = name.Trim();
         if (name.Length == 0) return;
         foreach (var f in _book.Rename(id, name)) Apply(f);
+        _hub?.SetName(id, name);   // a folder per computer follows the new name
         var i = _partners.FindIndex(x => x.Id == id);
         if (i >= 0) _partners[i] = _partners[i] with { Name = name.Length > 64 ? name[..64] : name };
         RefreshStatus();
@@ -224,6 +229,7 @@ sealed partial class MainWindow
 
     void OnWindowKey(object sender, KeyEventArgs e)
     {
+        if (FeedKey(e)) { e.Handled = true; return; }   // shortcuts and the feed by keyboard (beta.10)
         if (e.Key == Key.P && Keyboard.Modifiers == ModifierKeys.Control) { _pinned = !_pinned; ApplyPin(); e.Handled = true; }
     }
 
@@ -231,7 +237,9 @@ sealed partial class MainWindow
     ContextMenu StatusMenu()
     {
         var m = new ContextMenu();
-        var settings = new MenuItem { Header = "Settings…" };
+        var keys = new MenuItem { Header = "Keyboard shortcuts", InputGestureText = "Ctrl+/" };
+        keys.Click += (_, _) => ShowShortcuts();
+        var settings = new MenuItem { Header = "Settings…", InputGestureText = "Ctrl+," };
         settings.Click += (_, _) => ShowSettings();
         m.Items.Add(settings);
         var pair = new MenuItem { Header = "Pair with another computer…" };
@@ -244,7 +252,11 @@ sealed partial class MainWindow
         m.Items.Add(pair);
         m.Items.Add(pin);
         m.Items.Add(new Separator());
+        var tour = new MenuItem { Header = "Welcome tour" };
+        tour.Click += (_, _) => { if (_showingSettings) CloseSettings(); ShowTour(0); };
         m.Items.Add(check);
+        m.Items.Add(keys);
+        m.Items.Add(tour);
         return m;
     }
 
@@ -252,7 +264,14 @@ sealed partial class MainWindow
 
     FrameworkElement BuildPairPanel()
     {
-        var col = new StackPanel { Margin = new Thickness(22, 16, 22, 16) };
+        // Design refresh (beta.10): the code, name and address sit on one card, readable over any backdrop; the
+        // alternatives are quiet links beneath it.
+        var page = new StackPanel { Margin = new Thickness(12, 6, 12, 14) };
+        var col = new StackPanel();
+        var pairCard = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Padding = new Thickness(16, 18, 16, 16), Child = col };
+        pairCard.SetResourceReference(Border.BackgroundProperty, "GroupFill");
+        pairCard.SetResourceReference(Border.BorderBrushProperty, "GroupStroke");
+        page.Children.Add(pairCard);
         col.Children.Add(Mark(15));
         var title = new TextBlock { Text = "Pair with your other computer", FontSize = 15, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
         title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
@@ -279,10 +298,21 @@ sealed partial class MainWindow
         _myAddr.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         var waiting = new TextBlock { Text = "Waiting for the other computer…", FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0) };
         waiting.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        // the QR code for the iPhone companion (beta.10), behind a link so the window stays small
+        _qrBox.Child = _qrImage;
+        RenderOptions.SetBitmapScalingMode(_qrImage, BitmapScalingMode.NearestNeighbor);   // crisp modules
+        _qrBox.Visibility = Visibility.Collapsed;
+        _qrCaption.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+        _qrCaption.Visibility = Visibility.Collapsed;
+        _qrLink.SetResourceReference(StyleProperty, "LinkButton");
+        _qrLink.Click += (_, _) => { _showQR = !_showQR; RefreshPairPanel(); if (_showQR) Height = Math.Max(Height, 600); };
+        _showPart.Children.Add(_qrBox);
+        _showPart.Children.Add(_qrCaption);
         _showPart.Children.Add(codeBox);
         _showPart.Children.Add(_myName);
         _showPart.Children.Add(_myAddr);
         _showPart.Children.Add(waiting);
+        _showPart.Children.Add(_qrLink);
 
         // enter a code
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -315,9 +345,11 @@ sealed partial class MainWindow
         foreach (var l in new[] { _cancelLink, _switchLink }) { l.SetResourceReference(StyleProperty, "LinkButton"); links.Children.Add(l); }
         _cancelLink.Click += (_, _) => CancelPairing();
         _switchLink.Click += (_, _) => BeginPairing(!_showMode);
-        col.Children.Add(links);
+        var linksBack = Scrimmed(links, 9, HorizontalAlignment.Center);
+        linksBack.Padding = new Thickness(6, 2, 6, 3);
+        page.Children.Add(linksBack);
 
-        var sv = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col };
+        var sv = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = page };
         return sv;
     }
 
@@ -352,9 +384,14 @@ sealed partial class MainWindow
         _switchLink.Content = _showMode ? "Enter a code instead" : "Show a code instead";
         _codeText.Text = PairCode.Display(_code);
         Automation(_codeText, "Pairing code " + string.Join(" ", _code.ToCharArray()));
-        _myName.Text = MyName;
-        var addrs = Discovery.LocalAddresses();
+        var name = _demoName ?? MyName;
+        _myName.Text = name;
+        var addrs = _demoAddrs ?? Discovery.LocalAddresses();
         _myAddr.Text = addrs.FirstOrDefault() ?? "";
+        _qrLink.Content = _showQR ? "Hide the QR code" : "Pairing an iPhone? Show a QR code";
+        var link = _code.Length > 0 && addrs.Count > 0 ? new PairLink(_code, name, Port, [.. addrs]).Url : null;
+        if (_showQR && link != null && link != _qrFor) { _qrImage.Source = QrBitmap(QrCode.Encode(link)); _qrFor = link; }
+        _qrBox.Visibility = _qrCaption.Visibility = _showQR && link != null ? Visibility.Visible : Visibility.Collapsed;
         _searchBtn.IsEnabled = !_searching;
         _noneFound.Visibility = _found.Count == 0 && !_searching ? Visibility.Visible : Visibility.Collapsed;
         _pairBtn.IsEnabled = !_pairBusy;
@@ -389,9 +426,38 @@ sealed partial class MainWindow
     }
 
     /// <summary>--demo-pair show|enter: the pairing screen with sample values (screenshots).</summary>
+    readonly Border _qrBox = new() { Background = Brushes.White, CornerRadius = new CornerRadius(10), Padding = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 6) };
+    readonly Image _qrImage = new() { Width = 150, Height = 150, Stretch = Stretch.Fill };
+    readonly TextBlock _qrCaption = new() { Text = "Scan with Lan-Line on your iPhone", FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
+    readonly Button _qrLink = new() { FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0) };
+    bool _showQR;
+    string? _qrFor;
+
+    /// <summary>A QR matrix as a sharp bitmap (one pixel per module, scaled without smoothing), with the quiet zone.</summary>
+    static System.Windows.Media.Imaging.BitmapSource QrBitmap(bool[,] q)
+    {
+        var n = q.GetLength(0); var side = n + 8;
+        var px = new byte[side * side];
+        for (var y = 0; y < side; y++) for (var x = 0; x < side; x++)
+        {
+            int r = y - 4, c = x - 4;
+            px[y * side + x] = r >= 0 && c >= 0 && r < n && c < n && q[r, c] ? (byte)0 : (byte)255;
+        }
+        var bmp = System.Windows.Media.Imaging.BitmapSource.Create(side, side, 96, 96, PixelFormats.Gray8, null, px, side);
+        bmp.Freeze();
+        return bmp;
+    }
+
+    /// <summary>Screenshots show sample values, never this PC's real name and address.</summary>
+    string? _demoName;
+    List<string>? _demoAddrs;
+
     internal void DemoPair(string mode)
     {
+        _demoName = "Studio PC";
+        _demoAddrs = ["192.168.1.42"];
         _showMode = mode != "enter";
+        _showQR = mode == "qr";
         _code = "7QK4M2XH9C";
         if (!_showMode)
         {

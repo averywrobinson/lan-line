@@ -19,8 +19,12 @@ public struct LanLineConfig: Codable, Sendable, Equatable {
     public var connects: Bool { role == "connect" }
 
     public static var defaultURL: URL {
+        #if os(iOS)   // the iPhone companion (beta.10): the folder the app shares with its share sheet, else the app's own
+        SharedHome.supportDir.appendingPathComponent("config.json")
+        #else
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Lan-Line/config.json")
+        #endif
     }
 
     public static func load(from url: URL = defaultURL) throws -> LanLineConfig {
@@ -37,7 +41,11 @@ public struct LanLineConfig: Codable, Sendable, Equatable {
     }
 
     public static var downloadsDir: URL {
+        #if os(iOS)   // Documents/Lan-Line: shown in the Files app under "On My iPhone › Lan-Line"
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Lan-Line")
+        #else
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/Lan-Line")
+        #endif
     }
 }
 
@@ -64,6 +72,14 @@ extension Data {
 }
 
 public enum Hashing {
+    public static func sha256Hex(_ d: Data) -> String { Data(SHA256.hash(data: d)).hex }
+    /// A file's SHA-256, read in 1 MiB pieces (installers are tens of MB).
+    public static func sha256Hex(of url: URL) throws -> String {
+        let h = try FileHandle(forReadingFrom: url); defer { try? h.close() }
+        var hasher = SHA256()
+        while let d = try h.read(upToCount: 1 << 20), !d.isEmpty { hasher.update(data: d) }
+        return Data(hasher.finalize()).hex
+    }
     /// SHA-256 of a file, read in 1 MiB pieces so big files are never held in memory.
     public static func sha256(of url: URL) throws -> String {
         let h = try FileHandle(forReadingFrom: url)

@@ -27,10 +27,50 @@ public struct StorageSettings: Codable, Sendable, Equatable {
     /// Closing the window keeps Lan-Line running in the menu bar (Mac) or the notification area (Windows), and
     /// takes it out of the Dock / taskbar until the window is shown again (beta.9). nil = never set = on.
     public var keepRunningWhenClosed: Bool?
+    /// A system notification when something arrives while Lan-Line isn't the window in use (beta.10). nil = on.
+    public var notifyOnArrival: Bool?
+    /// Bring the window forward when something arrives (the behaviour before beta.10). nil = on.
+    public var popUpOnArrival: Bool?
+    /// Global shortcuts (beta.10), as `Shortcut` text. Show/hide: nil = the default (⌃⌥L / Ctrl+Alt+L), "" = off.
+    /// Send the clipboard: nil or "" = off.
+    /// The arrival chime and the send tick (beta.10). nil = on.
+    public var sounds: Bool?
+    /// Keep a history of finished items on this computer (`history.jsonl`) (beta.10). nil = on.
+    public var keepHistory: Bool?
+    /// Clipboard sharing (beta.10): off unless turned on (nil = off); pictures too while it is on (nil = on).
+    public var shareClipboard: Bool?
+    public var shareClipboardPictures: Bool?
+    /// Where received files go (beta.10): nil = Downloads/Lan-Line; a folder per computer inside it (nil = no);
+    /// what to do when one arrives ("nothing" / "reveal" / "open"; nil = nothing).
+    public var downloadFolder: String?
+    public var folderPerComputer: Bool?
+    public var afterReceive: String?
+    /// Link previews (beta.10): fetch a shared link's title and picture. Off unless turned on (nil = off).
+    public var linkPreviews: Bool?
+    /// Text size (accessibility pass, beta.10): one of `textScaleChoices`; nil = 100 %. On Windows it multiplies the
+    /// system's own Text size setting; on the Mac, which has no system-wide one for apps, it is the whole setting.
+    public var textScale: Double?
+    /// The welcome tour was shown, or isn't owed (beta.10): nil = a new install that hasn't seen it yet.
+    public var tourSeen: Bool?
+    public var shortcutShow: String?
+    public var shortcutSend: String?
 
     public init() {}
 
     public var keepRunningWhenClosedValue: Bool { keepRunningWhenClosed ?? true }
+    public var notifyOnArrivalValue: Bool { notifyOnArrival ?? true }
+    public var popUpOnArrivalValue: Bool { popUpOnArrival ?? true }
+    public var soundsValue: Bool { sounds ?? true }
+    public var keepHistoryValue: Bool { keepHistory ?? true }
+    public var shareClipboardValue: Bool { shareClipboard ?? false }
+    public var shareClipboardPicturesValue: Bool { shareClipboardPictures ?? true }
+    public var folderPerComputerValue: Bool { folderPerComputer ?? false }
+    public var linkPreviewsValue: Bool { linkPreviews ?? false }
+    public var afterReceiveValue: AfterReceive { afterReceive.flatMap(AfterReceive.init(rawValue:)) ?? .nothing }
+    /// The chosen folder, or nil for the default (Downloads/Lan-Line).
+    public var downloadFolderURL: URL? { downloadFolder.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) } }
+    public var showShortcut: Shortcut? { shortcutShow.map { Shortcut($0) } ?? .defaultShow }
+    public var sendShortcut: Shortcut? { shortcutSend.flatMap { Shortcut($0) } }
 
     public static let glassOpacityRange: ClosedRange<Double> = 0.40...1.00
     /// The look before the setting existed (the dark backdrop's alpha).
@@ -55,6 +95,24 @@ public struct StorageSettings: Codable, Sendable, Equatable {
         let o = clampOpacity(v), lo = glassOpacityRange.lowerBound
         if o >= defaultGlassOpacity { return 1 }
         return 0.35 + (o - lo) / (defaultGlassOpacity - lo) * 0.65
+    }
+
+    /// How strong the scrim under text that sits directly on the window body is (design refresh, beta.10):
+    /// nothing at the default opacity and above, rising evenly to full strength at the minimum. Bubbles, cards and
+    /// groups are near-opaque on their own; this covers the title, captions, notes and the empty state.
+    public static func scrimStrength(_ v: Double) -> Double {
+        let o = clampOpacity(v), lo = glassOpacityRange.lowerBound
+        return o >= defaultGlassOpacity ? 0 : (defaultGlassOpacity - o) / (defaultGlassOpacity - lo)
+    }
+    /// The scrim's opacity at full strength.
+    public static let scrimMax = 0.62
+
+    public static let textScaleChoices: [Double] = [0.9, 1.0, 1.15, 1.3, 1.5]
+    /// The saved text size snapped to the nearest choice (a hand-edited or damaged value can't make text unusable).
+    public var textScaleValue: Double { Self.snapTextScale(textScale ?? 1) }
+    public static func snapTextScale(_ v: Double) -> Double {
+        guard v.isFinite else { return 1 }
+        return textScaleChoices.min { abs($0 - v) < abs($1 - v) } ?? 1
     }
 
     public static let retentionChoices = [0, 1, 10, 30, 60, 90]

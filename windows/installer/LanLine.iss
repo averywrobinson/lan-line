@@ -4,7 +4,7 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.9"
+#define AppVersionFull "0.9.0-beta.10"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif
@@ -49,7 +49,6 @@ SolidCompression=yes
 CloseApplications=yes
 
 [Tasks]
-Name: "startup"; Description: "Start Lan-Line when I sign in"; Flags: unchecked
 Name: "desktopicon"; Description: "Add a desktop shortcut"; Flags: unchecked
 
 [Files]
@@ -71,7 +70,8 @@ Name: "{userdesktop}\Lan-Line"; Filename: "{app}\Lan-Line.exe"; Tasks: desktopic
 Name: "{usersendto}\Lan-Line"; Filename: "{app}\Lan-Line.exe"; Parameters: "--stage"; Comment: "Get these ready to send with Lan-Line"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Lan-Line"; ValueData: """{app}\Lan-Line.exe"""; Flags: uninsdeletevalue; Tasks: startup
+; "Open Lan-Line when I sign in" lives in the app's Settings since beta.10 (the Run value, with --background); the
+; old installer checkbox is gone so an upgrade never turns it back on. Uninstall removes the value (see [Code]).
 ; "Send with Lan-Line" for files and folders (beta.8). Per user, so no admin prompt; on Windows 11 it is under
 ; "Show more options" (the new top-level menu only lists packaged, signed apps). Removed on uninstall.
 Root: HKCU; Subkey: "Software\Classes\*\shell\LanLine.Send"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Send with Lan-Line"; Flags: uninsdeletekey
@@ -81,8 +81,18 @@ Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send"; ValueType: 
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\Lan-Line.exe"",0"
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\LanLine.Send\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Lan-Line.exe"" --stage ""%1"""
 
+; Notifications (beta.10): the toast sender's name and icon (unpackaged apps register their AppUserModelID per
+; user; the app also rewrites these at start), and lanline: links, which the toast buttons open.
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\LanLine.Desktop"; ValueType: string; ValueName: "DisplayName"; ValueData: "Lan-Line"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\lanline"; ValueType: string; ValueName: ""; ValueData: "URL:Lan-Line"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\lanline"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\lanline\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\Lan-Line.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\lanline\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Lan-Line.exe"" --url ""%1"""
+
 [Run]
 Filename: "{app}\Lan-Line.exe"; Description: "Open Lan-Line"; Flags: nowait postinstall skipifsilent
+; One-click update from inside Lan-Line (beta.10): silent, then reopen it.
+Filename: "{app}\Lan-Line.exe"; Flags: nowait; Check: IsLanLineUpdate
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -117,6 +127,12 @@ begin
       mbError, MB_OK, IDOK);
 end;
 
+// Started by Lan-Line's own Install button (/lanlineupdate=1), not by winget or a user.
+function IsLanLineUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:lanlineupdate|0}') = '1';
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := CloseRunningLanLine(WizardSilent(), 'setup');
@@ -125,4 +141,11 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := CloseRunningLanLine(UninstallSilent(), 'uninstall');
+end;
+
+// Open at sign-in is set in Lan-Line's Settings (beta.10); take it away with the app.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Lan-Line');
 end;

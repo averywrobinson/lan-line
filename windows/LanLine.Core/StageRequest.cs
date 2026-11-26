@@ -13,6 +13,7 @@ public static class StageRequest
     public const string Flag = "--stage";
     public const int MaxPaths = 200;
     const string Header = "LANLINE-STAGE 1";
+    const string LinkHeader = "LANLINE-LINK 1";
     const int MaxMessage = 1 << 20;
 
     /// <summary>The checked paths after <c>--stage</c>, or null when the flag isn't there.</summary>
@@ -52,11 +53,18 @@ public static class StageRequest
             ? Clean(message[(Header.Length + 1)..].Split('\n', StringSplitOptions.RemoveEmptyEntries), exists)
             : null;
 
+    /// <summary>A toast's lanline:// link for the running window (beta.10).</summary>
+    public static string EncodeLink(string url) => LinkHeader + "\n" + url.Replace("\n", "").Replace("\r", "") + "\n";
+
+    public static string? DecodeLink(string message) =>
+        message.StartsWith(LinkHeader + "\n", StringComparison.Ordinal) ? message[(LinkHeader.Length + 1)..].Trim() : null;
+
     /// <summary>The pipe for this sign-in session (other users and sessions can't connect: CurrentUserOnly).</summary>
     public static string PipeName(int sessionId) => $"Lan-Line.Stage.{sessionId}";
 
     /// <summary>Serve stage requests until cancelled. An empty list means "just show the window".</summary>
-    public static async Task Listen(string pipeName, Action<List<string>> onRequest, CancellationToken ct, Func<string, bool>? exists = null)
+    public static async Task Listen(string pipeName, Action<List<string>> onRequest, CancellationToken ct, Func<string, bool>? exists = null,
+                                    Action<string>? onLink = null)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -74,7 +82,9 @@ public static class StageRequest
                     while ((n = await server.ReadAsync(buf, read.Token)) > 0 && ms.Length <= MaxMessage) ms.Write(buf, 0, n);
                 }
                 if (ms.Length > MaxMessage) continue;
-                if (Decode(Encoding.UTF8.GetString(ms.ToArray()), exists) is { } paths) onRequest(paths);
+                var msg = Encoding.UTF8.GetString(ms.ToArray());
+                if (Decode(msg, exists) is { } paths) onRequest(paths);
+                else if (DecodeLink(msg) is { } link) onLink?.Invoke(link);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception) { await Task.Delay(100, CancellationToken.None); }   // a broken client; keep serving
@@ -82,10 +92,14 @@ public static class StageRequest
     }
 
     /// <summary>Hand paths to the running window. Retries while it is still starting (up to <paramref name="wait"/>).</summary>
-    public static bool TrySend(string pipeName, IReadOnlyList<string> paths, TimeSpan wait)
+    public static bool TrySend(string pipeName, IReadOnlyList<string> paths, TimeSpan wait) => TrySendMessage(pipeName, Encode(paths), wait);
+
+    public static bool TrySendLink(string pipeName, string url, TimeSpan wait) => TrySendMessage(pipeName, EncodeLink(url), wait);
+
+    static bool TrySendMessage(string pipeName, string message, TimeSpan wait)
     {
         var deadline = DateTime.UtcNow + wait;
-        var data = Encoding.UTF8.GetBytes(Encode(paths));
+        var data = Encoding.UTF8.GetBytes(message);
         while (true)
         {
             try

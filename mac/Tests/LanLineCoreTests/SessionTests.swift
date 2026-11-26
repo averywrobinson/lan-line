@@ -320,6 +320,47 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(parts, [])
     }
 
+    /// The iPhone's share sheet connects with the "sendonly" cap: it hands things over, and what is queued for
+    /// the phone waits until the app itself connects.
+    func testSendOnlyPeerLeavesTheQueueForTheApp() async throws {
+        let (srv, srec, port) = await startListener("sendonly-srv")
+        defer { srv.stop() }
+        var c = makeConfig("sendonly-sheet")
+        c.caps = c.caps.filter { $0 != "clip" } + ["sendonly"]
+        let (sheet, shrec) = startDialer("sendonly-sheet", port: port, config: c)
+        await waitUntil(5, "sheet connected") { srec.connectedCount == 1 && shrec.connectedCount == 1 }
+
+        let held = srv.send(text: "for the phone")
+        let given = sheet.send(text: "from the share sheet")
+        await waitUntil(5, "the sheet's text is delivered") { srec.received.count == 1 && shrec.lastState(given.id) == .delivered }
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(shrec.received.isEmpty, "nothing goes to the sheet")
+        XCTAssertNotEqual(srec.lastState(held.id), .delivered, "the queued text still waits")
+        sheet.stop()
+
+        let (app, arec) = startDialer("sendonly-app", port: port)
+        defer { app.stop() }
+        await waitUntil(5, "the app gets the queued text") { arec.received.count == 1 && srec.lastState(held.id) == .delivered }
+        XCTAssertEqual(arec.received.first?.kind, .text("for the phone"))
+    }
+
+    /// hold(): off the line with no redial; redialNow() comes straight back. Items sent meanwhile wait.
+    func testHoldStaysAwayUntilRedialNow() async throws {
+        let (srv, srec, port) = await startListener("hold-srv")
+        defer { srv.stop() }
+        let (cli, crec) = startDialer("hold-cli", port: port)
+        defer { cli.stop() }
+        await waitUntil(5, "connected") { srec.connectedCount == 1 && crec.connectedCount == 1 }
+        cli.hold()
+        await waitUntil(5, "dropped") { srec.disconnects.count == 1 && crec.disconnects.count == 1 }
+        let waiting = cli.send(text: "sent while held")
+        try await Task.sleep(nanoseconds: 1_200_000_000)   // several backoff rounds (0.2 s, 0.4 s)
+        XCTAssertEqual(srec.connectedCount, 1, "no redial while held")
+        cli.redialNow()
+        await waitUntil(5, "back and delivered") { srec.connectedCount == 2 && crec.lastState(waiting.id) == .delivered }
+        XCTAssertEqual(srec.received.first?.kind, .text("sent while held"))
+    }
+
     func testNewPeerReplacesOld() async throws {
         let (srv, rec, port) = await startListener("replace")
         defer { srv.stop() }

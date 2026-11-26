@@ -32,10 +32,11 @@ public sealed record HubItem(string Id, Item Item, string[] To, IReadOnlyDiction
         {
             var s = To.Where(States.ContainsKey).Select(t => States[t]).ToList();
             if (s.Count == To.Length && s.All(x => x.Kind == ItemStateKind.Delivered)) return ItemState.Delivered;
-            var busy = s.Where(x => x.Kind is not (ItemStateKind.Delivered or ItemStateKind.Failed)).ToList();
+            var busy = s.Where(x => x.Kind is not (ItemStateKind.Delivered or ItemStateKind.Failed or ItemStateKind.Cancelled)).ToList();
             var failed = s.Where(x => x.Kind == ItemStateKind.Failed).ToList();
             if (busy.Count == 0 && failed.Count > 0)
                 return new ItemState(ItemStateKind.Failed, Error: To.Length > 1 ? $"{failed.Count} of {To.Length}: {failed[0].Error}" : failed[0].Error);
+            if (busy.Count == 0 && s.Any(x => x.Kind == ItemStateKind.Cancelled)) return ItemState.CancelledState;
             if (s.Count < To.Length || busy.Any(x => x.Kind == ItemStateKind.Waiting)) return ItemState.Waiting;
             var sending = busy.Where(x => x.Kind == ItemStateKind.Sending).ToList();
             if (sending.Count > 0) return new ItemState(ItemStateKind.Sending, sending.Average(x => x.Progress));
@@ -51,7 +52,12 @@ public abstract record HubEvent
     public sealed record Disconnected(string Partner, string Reason) : HubEvent;
     public sealed record Received(string Partner, Item Item) : HubEvent;
     public sealed record Outgoing(HubItem Item) : HubEvent;
-    public sealed record ReceiveFailed(string Partner, string Name, string Reason) : HubEvent;
+    /// <summary>An incoming file or folder still arriving, or stopped short (beta.10).</summary>
+    public sealed record Incoming(string Partner, Item Item) : HubEvent;
+    /// <summary>A partner's clipboard (clipboard sharing, beta.10).</summary>
+    public sealed record Clipboard(string Partner, ClipContent Content) : HubEvent;
+    /// <summary>Id: the item that failed (the same id its progress card had, if it had one).</summary>
+    public sealed record ReceiveFailed(string Partner, string Name, string Reason, string Id = "") : HubEvent;
     public sealed record Status(string Partner, string Text) : HubEvent;
     /// <summary>Pairing: the code was swapped for this long-term secret; save it for that partner.</summary>
     public sealed record Rekeyed(string Partner, string Token) : HubEvent;
@@ -132,8 +138,23 @@ public sealed class Hub : IDisposable
             _up.Remove(p.Id);
             return o;
         });
-        old?.Stop();
-        _q.Post(() => { if (!_stopped) { MakeSession(p.Id, pairing); EnsureListener(); } });
+        var kept = old?.StopKeepingPartials();   // half-received files stay resumable across the swap
+        _q.Post(() =>
+        {
+            if (!_stopped) { MakeSession(p.Id, pairing, kept); EnsureListener(); }
+            else if (kept != null) foreach (var k in kept.Values) try { File.Delete(k.Part); } catch (Exception) { }
+        });
+    }
+
+    /// <summary>The partner's name changed (it said so in its hello, or it was renamed here): with a folder per computer,
+    /// what arrives from now on goes to the folder of that name. A file already arriving finishes where it started.</summary>
+    public void SetName(string id, string name) => _q.Post(() => SetNameOnQueue(id, name));
+
+    void SetNameOnQueue(string id, string name)
+    {
+        if (name.Length == 0 || !_partners.TryGetValue(id, out var p) || p.Name == name) return;
+        _partners[id] = p with { Name = name };
+        if (_perComputer && _sessions.TryGetValue(id, out var s)) s.SetDownloadDir(FolderFor(id));
     }
 
     /// <summary>Forget a partner: its Session stops and its secret is no longer accepted.</summary>
@@ -163,6 +184,46 @@ public sealed class Hub : IDisposable
     }
 
     // ---------- sending
+
+    /// <summary>Share the clipboard with every connected partner that takes it (beta.10); never queued. done gets how
+    /// many it went to and how many connected partners are too old for it.</summary>
+    public void SendClip(ClipContent c, Action<int, int>? done = null) => _q.Post(() =>
+    {
+        var ss = _order.Where(_sessions.ContainsKey).Select(id => _sessions[id]).ToList();
+        int pending = ss.Count, sent = 0, old = 0;
+        if (pending == 0) { done?.Invoke(0, 0); return; }
+        void One() { if (Interlocked.Decrement(ref pending) == 0) done?.Invoke(sent, old); }
+        foreach (var s in ss)
+            s.PeerTakesClips(t =>
+            {
+                if (t == false) Interlocked.Increment(ref old);
+                if (t == true) s.SendClip(c, ok => { if (ok) Interlocked.Increment(ref sent); One(); });
+                else One();
+            });
+    });
+
+    /// <summary>Where received files go (beta.10): one folder, or a folder per computer inside it; for every partner
+    /// now and those added later.</summary>
+    public void SetDownloads(string baseDir, bool perComputer) => _q.Post(() =>
+    {
+        _downloadBase = baseDir; _perComputer = perComputer;
+        foreach (var (id, s) in _sessions) s.SetDownloadDir(FolderFor(id));
+    });
+
+    string? _downloadBase;
+    bool _perComputer;
+    string FolderFor(string id) =>
+        ReceiveOptions.Folder(_downloadBase ?? Config.DownloadDir, _perComputer, _partners.TryGetValue(id, out var p) ? p.Name : id);
+
+    /// <summary>Stop an outgoing item for everyone it is still going to (beta.10).</summary>
+    public void Cancel(string hubId) => _q.Post(() =>
+    {
+        foreach (var (sid, r) in _routes.Where(r => r.Value.Hub == hubId).ToList())
+            if (_sessions.TryGetValue(r.Partner, out var s)) s.Cancel(sid);
+    });
+
+    /// <summary>Refuse an incoming item that is still arriving from a partner (beta.10).</summary>
+    public void CancelIncoming(string partner, string id) => _q.Post(() => { if (_sessions.TryGetValue(partner, out var s)) s.CancelIncoming(id); });
 
     public HubItem SendText(string text, string? to) =>
         FanOut(new Item("", false, text, null, text.Length, null, ItemState.Waiting), to, s => s.SendText(text));
@@ -200,12 +261,12 @@ public sealed class Hub : IDisposable
 
     // ---------- sessions
 
-    void MakeSession(string id, bool pairing)
+    void MakeSession(string id, bool pairing, Dictionary<string, Session.Partial>? partials = null)
     {
         if (!_partners.TryGetValue(id, out var p)) return;
         var sc = new SessionConfig
         {
-            Token = p.Secret, Name = Config.Name, DownloadDir = Config.DownloadDir, AppVersion = Config.AppVersion, LatestKnown = Config.LatestKnown,
+            Token = p.Secret, Name = Config.Name, DownloadDir = FolderFor(id), AppVersion = Config.AppVersion, LatestKnown = Config.LatestKnown,
             DeviceId = Config.DeviceId, RekeyOnPair = pairing && !p.Connects, External = !p.Connects, Advertise = p.Connects ? [] : Config.Advertise,
         };
         if (Config.Tune != null) sc = Config.Tune(sc);
@@ -214,6 +275,7 @@ public sealed class Hub : IDisposable
         _tags[id] = tag;
         var s = new Session(role, sc, e => FromSession(tag.Id, e), queue: _q);
         _sessions[id] = s;
+        if (partials is { Count: > 0 }) s.AdoptPartials(partials);
         s.Start();
     }
 
@@ -221,16 +283,22 @@ public sealed class Hub : IDisposable
     {
         switch (e)
         {
-            case SessionEvent.Connected c: _up.Add(id); _handler(new HubEvent.Connected(id, c.Peer)); break;
+            case SessionEvent.Connected c:
+                _up.Add(id);
+                SetNameOnQueue(id, c.Peer);   // the folder per computer follows the name the computer gives itself
+                _handler(new HubEvent.Connected(id, c.Peer));
+                break;
             case SessionEvent.Disconnected d: _up.Remove(id); _handler(new HubEvent.Disconnected(id, d.Reason)); break;
             case SessionEvent.Received r: _handler(new HubEvent.Received(id, r.Item)); break;
+            case SessionEvent.Incoming inc: _handler(new HubEvent.Incoming(id, inc.Item)); break;
+            case SessionEvent.Clipboard cb: _handler(new HubEvent.Clipboard(id, cb.Content)); break;
             case SessionEvent.Outgoing o:
                 if (!_routes.TryGetValue(o.Item.Id, out var r2) || !_items.TryGetValue(r2.Hub, out var h)) return;
                 var st = new Dictionary<string, ItemState>(h.States) { [r2.Partner] = o.Item.State };
                 _items[r2.Hub] = h = h with { States = st };
                 _handler(new HubEvent.Outgoing(h));
                 break;
-            case SessionEvent.ReceiveFailed f: _handler(new HubEvent.ReceiveFailed(id, f.Name, f.Reason)); break;
+            case SessionEvent.ReceiveFailed f: _handler(new HubEvent.ReceiveFailed(id, f.Name, f.Reason, f.Id)); break;
             case SessionEvent.Error err: _handler(new HubEvent.Error(err.Message)); break;
             case SessionEvent.Status s: _handler(new HubEvent.Status(id, s.Text)); break;
             case SessionEvent.Rekeyed rk:
@@ -277,8 +345,12 @@ public sealed class Hub : IDisposable
                 return o;
             });
             if (old == null) continue;
-            old.Stop();
-            _q.Post(() => { if (!_stopped && _partners.ContainsKey(p.Id) && !_sessions.ContainsKey(p.Id)) MakeSession(p.Id, pairing: false); });
+            var kept = old.StopKeepingPartials();   // a file cut off by the address change stays resumable
+            _q.Post(() =>
+            {
+                if (!_stopped && _partners.ContainsKey(p.Id) && !_sessions.ContainsKey(p.Id)) MakeSession(p.Id, pairing: false, kept);
+                else foreach (var k in kept.Values) try { File.Delete(k.Part); } catch (Exception) { }
+            });
         }
     }
 
@@ -298,7 +370,7 @@ public sealed class Hub : IDisposable
 
     void Accept(WebSocket ws, string peer)
     {
-        if (_stopped) { ws.Abort(); return; }
+        if (_stopped || _pending.Count >= Session.MaxPending) { ws.Abort(); return; }   // strangers can't pile up connections
         Link? link = null;
         link = Link.Accepted(ws, peer, _q, DateTime.UtcNow, (l, ev) =>
         {

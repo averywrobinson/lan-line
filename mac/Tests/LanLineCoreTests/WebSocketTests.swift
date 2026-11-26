@@ -26,6 +26,21 @@ final class WebSocketTests: XCTestCase {
         XCTAssertEqual(try p.feed(b + a), [.binary(Data(repeating: 9, count: 70_000)), .text("héllo ✓")])
     }
 
+    /// Before the first whole message (the hello), nothing big is taken in; afterwards the full limit applies.
+    func testFirstMessageHasItsOwnSmallLimit() throws {
+        let small = Data(repeating: 0x61, count: 50), big = Data(repeating: 0x62, count: 5000)
+        var stranger = WSParser(expectMasked: true, maxMessage: 1 << 20, firstMessage: 100)
+        XCTAssertThrowsError(try stranger.feed(WSFrame.encode(.text, big, maskKey: 7))) { XCTAssertEqual(($0 as? WSError)?.code, 1009) }
+        var fragments = WSParser(expectMasked: false, maxMessage: 1 << 20, firstMessage: 100)   // nor in pieces
+        _ = try fragments.feed(Data([0x01, 60] + [UInt8](repeating: 0x61, count: 60)))
+        XCTAssertThrowsError(try fragments.feed(Data([0x80, 60] + [UInt8](repeating: 0x61, count: 60)))) { XCTAssertEqual(($0 as? WSError)?.code, 1009) }
+        var peer = WSParser(expectMasked: true, maxMessage: 1 << 20, firstMessage: 100)
+        XCTAssertEqual(try peer.feed(WSFrame.encode(.text, small, maskKey: 7)).count, 1)
+        XCTAssertEqual(try peer.feed(WSFrame.encode(.binary, big, maskKey: 9)).count, 1, "after the hello the full limit applies")
+        var together = WSParser(expectMasked: true, maxMessage: 1 << 20, firstMessage: 100)   // hello and a big frame in one read
+        XCTAssertEqual(try together.feed(WSFrame.encode(.text, small, maskKey: 7) + WSFrame.encode(.binary, big, maskKey: 9)).count, 2)
+    }
+
     func testFragmentedMessageWithPingInside() throws {
         func frame(_ b0: UInt8, _ payload: [UInt8]) -> Data { Data([b0, UInt8(payload.count)] + payload) }   // unmasked
         var p = WSParser(expectMasked: false, maxMessage: 100)

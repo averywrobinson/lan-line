@@ -96,6 +96,13 @@ public static class Headless
         var sendText = Val(args, "--send-text");
         var sendFile = Val(args, "--send-file");
         var sendFolder = Val(args, "--send-folder");
+        // beta.10 checks: stop our own send at this fraction, or refuse an incoming one
+        double? cancelAt = double.TryParse(Val(args, "--cancel-at"), System.Globalization.CultureInfo.InvariantCulture, out var ca) ? ca : null;
+        double? stopAt = double.TryParse(Val(args, "--stop-incoming-at"), System.Globalization.CultureInfo.InvariantCulture, out var sa) ? sa : null;
+        bool cancelSent = false, stopSent = false;
+        double? dropAt = double.TryParse(Val(args, "--drop-at"), System.Globalization.CultureInfo.InvariantCulture, out var da) ? da : null;   // beta.10: cut the link once mid-file
+        bool dropped = false, loggedAfterDrop = false;
+        var sendClip = Val(args, "--send-clip");   // beta.10 checks: one clipboard text, exit when it went out
         bool AllBack() => gotText && gotFile && (gotFolder || !withFolder);
         string PassText() => $"text and {sizeMb} MB file{(withFolder ? $" and a {testTree.Count}-entry folder" : "")} came back intact";
 
@@ -113,6 +120,12 @@ public static class Headless
                 case SessionEvent.Connected c:
                     connects++;
                     Log("connected", new() { ["peer"] = c.Peer });
+                    if (sendClip != null)
+                    {
+                        var clip = new ClipContent.TextClip(sendClip);
+                        Log("clip_fingerprint", new() { ["fingerprint"] = ClipRules.Fingerprint(clip) });
+                        session!.SendClip(clip, ok => { Log(ok ? "clip_sent" : "clip_not_sent"); exit.TrySetResult(ok ? 0 : 1); });
+                    }
                     if (!started && (sendText != null || sendFile != null || sendFolder != null))
                     {
                         started = true;
@@ -152,6 +165,32 @@ public static class Headless
                 case SessionEvent.Outgoing o when o.Item.State.Kind == ItemStateKind.Delivered:
                     Log("delivered", new() { ["id"] = o.Item.Id });
                     if (oneShot.Remove(o.Item.Id) && oneShot.Count == 0) { Log("sent_all"); exit.TrySetResult(0); }
+                    break;
+                case SessionEvent.Outgoing o when o.Item.State is { Kind: ItemStateKind.Sending } ds && dropAt is { } dat && (!dropped && ds.Progress >= dat || dropped && connects >= 2 && !loggedAfterDrop):
+                    if (!dropped) { dropped = true; Log("drop_link", new() { ["at"] = ds.Progress }); session!.DropLink(); }
+                    else { loggedAfterDrop = true; Log("first_progress_after_reconnect", new() { ["at"] = ds.Progress }); }
+                    break;
+                case SessionEvent.Outgoing o when o.Item.State is { Kind: ItemStateKind.Sending } st && cancelAt is { } at && st.Progress >= at && !cancelSent:
+                    cancelSent = true;
+                    Log("cancel_sent", new() { ["id"] = o.Item.Id, ["at"] = st.Progress });
+                    session!.Cancel(o.Item.Id);
+                    break;
+                case SessionEvent.Outgoing o when o.Item.State.Kind == ItemStateKind.Cancelled:
+                    Log("cancelled", new() { ["id"] = o.Item.Id });
+                    if (oneShot.Remove(o.Item.Id)) oneShot.Add(session!.SendText("after-cancel").Id);   // then prove the link is still in step
+                    break;
+                case SessionEvent.Clipboard cb:
+                    Log(cb.Content is ClipContent.TextClip ct ? "clipboard_text" : "clipboard_png", new()
+                        { ["fingerprint"] = ClipRules.Fingerprint(cb.Content), ["size"] = cb.Content is ClipContent.TextClip t2 ? t2.Text.Length : ((ClipContent.PngClip)cb.Content).Data.Length });
+                    break;
+                case SessionEvent.Incoming inc:
+                    Log("incoming", new() { ["id"] = inc.Item.Id, ["state"] = $"{inc.Item.State.Kind} {inc.Item.State.Progress:0.00}" });
+                    if (inc.Item.State.Kind == ItemStateKind.Receiving && stopAt is { } sat && inc.Item.State.Progress >= sat && !stopSent)
+                    {
+                        stopSent = true;
+                        Log("stop_incoming", new() { ["id"] = inc.Item.Id, ["at"] = inc.Item.State.Progress });
+                        session!.CancelIncoming(inc.Item.Id);
+                    }
                     break;
                 case SessionEvent.Outgoing o when o.Item.State.Kind == ItemStateKind.Failed:
                     Log("send_failed", new() { ["id"] = o.Item.Id, ["why"] = o.Item.State.Error });

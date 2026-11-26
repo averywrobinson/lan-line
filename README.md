@@ -5,7 +5,7 @@
 <h1 align="center">Lan-Line</h1>
 
 <p align="center"><b>Drop here. Grab there.</b><br>
-A quiet, pinned window on your Mac and your Windows PC for moving files, pasted screenshots, links and text between them over your local network. No cloud, no accounts.</p>
+A quiet, pinned window on your Mac and your Windows PC for moving files, folders, pasted screenshots, links and text between them over your local network, encrypted end to end. No cloud, no accounts.</p>
 
 <p align="center">
   <a href="https://averywrobinson.com/lan-line/"><b>Website</b></a> ·
@@ -15,7 +15,7 @@ A quiet, pinned window on your Mac and your Windows PC for moving files, pasted 
 
 <p align="center">
   <img alt="Public beta" src="https://img.shields.io/badge/status-public%20beta-F59E0B">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%2014%2B%20%7C%20Windows%2010%2F11-64748B">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%2013%2B%20%7C%20Windows%2010%2F11-64748B">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-34D359">
 </p>
 
@@ -29,20 +29,32 @@ If a Mac and a Windows PC share your desk, moving a screenshot or a config snipp
 
 ## Features
 
-- **Always pinned.** The pushpin keeps Lan-Line floating above your work (`⌘P` / `Ctrl+P`).
-- **Paste screenshots straight in.** An image on the clipboard becomes a timestamped `pasted-….png` you can drag out on the other side.
-- **Copy and delivery checks.** Every message and file has a copy button and a ✓ once the other computer has it.
-- **Wakes on receive.** Minimize it; it pops back up when something arrives.
-- **Stays out of the way.** Close the window and Lan-Line keeps running in the Mac menu bar or the Windows notification area (tray), off the Dock and taskbar, still receiving. Settings can make closing quit instead.
-- **Direct and local.** Machine to machine over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
-- **Several computers.** Pair up to 8 Macs and PCs. Send goes to everyone by default, or pick one computer next to Send; each message says who it came from or went to, with "✓ 2/3" until all have it. Settings → Paired computers lets you rename or forget one.
-- **Whole folders.** Drop a folder and it arrives as one item, subfolders and empty folders included, shown as one chip with its file count and size. Shortcuts (symlinks) are left out.
-- **Send from Finder or Explorer.** Mac: right-click → Share → Lan-Line. Windows: right-click → Send to → Lan-Line, or "Send with Lan-Line" under Show more options. Lan-Line opens with them ready to send; nothing goes out until you press Send.
-- **Too big? Said up front.** If the other computer doesn't have room, both windows say so straight away, before anything is sent.
-- **Encrypted end to end.** Everything between the two computers is encrypted (AES-256-GCM), with fresh keys for every connection. The pairing code and the long-term secret are never sent in the clear.
-- **Live status.** Emerald means connected; slate means waiting for the other computer.
-- **Storage you control.** Keep received files forever or for 1–90 days (or custom), set a storage limit with gentle warnings, and optionally move the oldest files to the Trash / Recycle Bin. Nothing is deleted unless you turn it on.
-- **Follows your theme.** Smoked glass in dark mode, a matching light look, on both systems. Settings → Window opacity sets how see-through the glass is (40–100 %); text stays fully readable.
+**Sending**
+- **Drop, paste or type.** Files, whole folders (subfolders and empty folders included), pasted screenshots, links and text. A pasted image becomes a timestamped `pasted-….png`.
+- **From anywhere.** Mac: right-click → Share → Lan-Line, or drop on the menu bar or Dock icon. Windows: right-click → Send to → Lan-Line, or an optional drop zone at the screen edge. A shortcut can send whatever is on the clipboard.
+- **Big files without babysitting.** Live speed and time left, in the window and on the Dock or taskbar. Cancel from either side. If the link drops mid-file, it carries on from where it stopped.
+- **Too big? Said up front.** If the other computer doesn't have room, both windows say so before anything is sent.
+- **Several computers.** Pair up to 8 Macs and PCs. Send goes to everyone, or pick one next to Send; each item says who it came from or went to, with "✓ 2/3" until all have it.
+
+**Receiving**
+- **Tells you when it lands.** The window comes forward, a notification offers Copy or Open, the icon carries a count until you've looked, and a soft chime plays (all optional).
+- **One-click copy.** Every message and file has a copy button and a ✓ once the other computer has it. One-time codes get their own Copy button, links become cards, colours show a swatch and code keeps its formatting.
+- **Look before you open.** Real thumbnails; press Space on a file to preview it.
+- **Lands where you want.** Downloads, the Desktop or any folder, optionally a folder per computer, and optionally shown or opened on arrival.
+- **Shared clipboard, if you want it.** Off until you turn it on: copy on one computer, paste on the other. Text and pictures; anything a password manager marks private is never shared.
+- **History and search.** The last 1,000 items stay after a restart, on that computer only. `⌘F` / `Ctrl+F` searches them, with filters for text, pictures, files and links.
+
+**The window**
+- **Always pinned.** The pushpin keeps Lan-Line floating above your work (`⌘P` / `Ctrl+P`); a shortcut shows or hides it from any app.
+- **Stays out of the way.** Close the window and Lan-Line keeps running in the Mac menu bar or the Windows notification area, still receiving. It can open at login. Settings can make closing quit instead.
+- **At home on each system.** Liquid Glass on macOS 26, Mica and Acrylic on Windows 11, solid and tidy on older systems; light and dark follow your system. Window opacity is yours to set (40–100 %); text stays fully readable.
+- **Readable and reachable.** Its own text size (Windows also follows the system's), Increase Contrast and Windows contrast themes, VoiceOver and Narrator announce what arrives, and every action has a key (`⌘/` / `Ctrl+/` lists them).
+- **Storage you control.** Keep received files forever or for 1–90 days, set a storage limit with gentle warnings, and optionally move the oldest files to the Trash / Recycle Bin. Nothing is deleted unless you turn it on.
+
+**Private by design**
+- **Direct and local.** Computer to computer over your LAN: no relay, no compression, no size cap beyond free disk space. Every file is checked with SHA-256.
+- **Encrypted end to end.** AES-256-GCM with fresh keys for every connection. The pairing code and the long-term secret are never sent in the clear.
+- **Updates you can trust.** A notice offers the new version; one click installs it, and only if its signature checks out.
 
 ## Screenshots
 
@@ -60,8 +72,8 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.9-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
-| **Windows** | `Lan-Line-0.9.0-beta.9-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.10-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
+| **Windows** | `Lan-Line-0.9.0-beta.10-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew (Apple Silicon; Intel Macs use the DMG):
 
@@ -81,9 +93,9 @@ Homebrew 7 asks you to trust third-party taps; without it, `brew upgrade` may sk
 
 1. Open Lan-Line on both computers.
 2. One computer shows a pairing code (the Mac does by default). On the other, pick it from **On your network** and type the code.
-3. The dot turns green. Drop a file, paste a screenshot or type a message on either side, then copy it or drag it out on the other.
+3. The dot turns green and a three-card tour shows the basics once. Drop a file, paste a screenshot or type a message on either side, then copy it or drag it out on the other.
 
-Pairing again later: *Lan-Line → Pair with Another Computer…* on the Mac, or right-click the status line on Windows. Two Macs or two PCs pair the same way.
+Pairing again later: *Lan-Line → Pair with Another Computer…* on the Mac, or right-click the status line on Windows. Two Macs or two PCs pair the same way. The tour is under *Help → Welcome Tour* (Mac) or the status-line menu (Windows).
 
 Closed the window? On a Mac, Lan-Line is in the menu bar (two linked squares); on Windows, in the notification area by the clock (under ^ if Windows tucked it away: drag it onto the taskbar to keep it in view). Click it to show the window; Quit / Exit is in its menu.
 
@@ -96,20 +108,33 @@ Sending from Finder or Explorer: right-click → **Share → Lan-Line** (Mac) or
 | Send | `Return` | `Enter` |
 | New line | `Shift+Return` | `Shift+Enter` |
 | Paste a file or screenshot | `⌘V` | `Ctrl+V` |
+| Search | `⌘F` | `Ctrl+F` |
+| Preview the selected file | `Space` | `Space` |
 | Keep on top | `⌘P` | `Ctrl+P` |
+| Show or hide from any app | `⌃⌥L` | `Ctrl+Alt+L` |
+| List every shortcut | `⌘/` | `Ctrl+/` |
 | Minimize | `⌘M` | `Win+↓` |
+
+The show/hide shortcut can be changed in Settings, where you can also set one that sends the clipboard.
 
 ## Privacy
 
-**Your files and messages never leave your network. Lan-Line only goes online when you click Check for Updates or turn on daily checks.** No servers, no accounts, no analytics or telemetry. Received files land in `Downloads/Lan-Line`.
+**Your files and messages never leave your network.** No servers, no accounts, no analytics or telemetry. Received files land in `Downloads/Lan-Line` unless you pick another folder. The history stays on each computer and is never synced.
 
-**Updates:** Lan-Line never downloads or installs anything itself. *Check for Updates…* (Mac: the Lan-Line menu; Windows: the menu under the status line) reads one small file, `https://averywrobinson.com/lan-line/version.json`, with no ID or query string. Daily checks are off unless you turn them on in Settings. The two computers also tell each other, over the encrypted link, about a newer version either one knows of, and show a "Download" link to the release page (only Lan-Line's own pages are ever linked). To hear about releases by email instead, *Watch → Custom → Releases* on this GitHub page.
+**The only times Lan-Line goes online:**
+- **Checking for updates:** when you click *Check for Updates…* (Mac: the Lan-Line menu; Windows: the menu under the status line), or once a day if you turn daily checks on. It reads one small file, `https://averywrobinson.com/lan-line/version.json`, with no ID or query string.
+- **Installing an update:** when you click *Install* on an update notice. Lan-Line reads the signed `update.json` from the same site, downloads the release file it names from this repository's GitHub Releases, and uses it only if the signature, size and SHA-256 all match. Nothing is downloaded until you click.
+- **Link previews:** off unless you turn them on. When on, the computer showing a link fetches that page for its title and picture.
 
-Since 0.9.0-beta.5, all traffic between the two computers is encrypted. The pairing code only proves that the two computers belong together and is never sent; right after pairing they switch to a random 32-byte secret, which travels encrypted. Every connection derives its own AES-256-GCM keys from a fresh P-256 key exchange, so someone on your network can neither read nor change what you send, and a secret stolen later can't decrypt old traffic. The secret is stored only in your user's app-data folder.
+The two computers also tell each other, over the encrypted link, about a newer version either one knows of. To hear about releases by email instead, *Watch → Custom → Releases* on this GitHub page.
+
+**Clipboard sharing** is off until you turn it on, goes only to your paired computers over the same encrypted link, and skips anything marked private (as password managers do).
+
+All traffic between the computers is encrypted. The pairing code only proves that the two computers belong together and is never sent; right after pairing they switch to a random 32-byte secret, which travels encrypted. Every connection derives its own AES-256-GCM keys from a fresh P-256 key exchange, so someone on your network can neither read nor change what you send, and a secret stolen later can't decrypt old traffic. The secret is stored only in your user's app-data folder.
 
 Limits: someone on your network can still see how much is sent and when, and encryption can't protect a computer that is already compromised. Full design and threat model: [ENCRYPTION.md](ENCRYPTION.md).
 
-**Updating from beta.4:** update both computers. beta.5 and later can't talk to beta.4 (there is no unencrypted fallback); until both are updated, the window says "Update Lan-Line on …". beta.5, beta.6 and beta.7 work together; folders need beta.6 or later on both ends, and pairing more than two computers needs beta.7 on the computers with several partners. Your pairing carries over.
+**Updating from an older beta:** update both computers. Any two betas from beta.5 on can talk to each other; clipboard sharing and carrying on after a dropped connection need beta.10 on both ends, and folders need beta.6 or later. beta.4 and earlier can't connect to anything newer; the window says "Update Lan-Line on …". Your pairing carries over.
 
 ## How it works
 
@@ -145,7 +170,7 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 
 - **Who:** Avery Robinson ([@averywrobinson](https://github.com/averywrobinson)) is the author, reviewer and approver of every release. AI coding assistants help write the code; every change is reviewed, and only Avery approves a signing request.
 - **What gets signed:** only installers built by this repository's GitHub Actions workflow (`.github/workflows/windows-release.yml`) from a tagged commit of this public source. Windows signing starts once SignPath Foundation approves the project; until then the Windows installer is unsigned and SmartScreen warns about it.
-- **Privacy:** Lan-Line sends nothing to anyone but your own paired computers. It has no telemetry, accounts or analytics; the optional update check reads one small file (`version.json`) and sends no ID. See the README's privacy notes.
+- **Privacy:** Lan-Line sends nothing to anyone but your own paired computers. It has no telemetry, accounts or analytics. It goes online only to check for an update (one small file, no ID), to download an update you chose to install, and, if you turn link previews on, to fetch the pages of links you receive. See the README's privacy notes.
 - **MFA:** two-factor authentication is on for every account with access to this repository and to SignPath.
 
 ## Feedback

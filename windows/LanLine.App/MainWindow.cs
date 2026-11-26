@@ -59,8 +59,11 @@ sealed partial class MainWindow : Window
         : s.Contains("newer Lan-Line") ? "Update Lan-Line on this PC"
         : $"Can't reach {away}";
 
+    readonly bool _demo;
+
     public MainWindow(string[] args, bool demo = false)
     {
+        _demo = demo;
         Title = "Lan-Line";
         Width = 380; Height = 320; MinWidth = 300; MinHeight = 230;
         Topmost = true;
@@ -76,7 +79,8 @@ sealed partial class MainWindow : Window
             CaptionHeight = 52, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = Theme.Glass ? new Thickness(-1) : new Thickness(0, 0, 0, 1),
             CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false,
         });
-        SourceInitialized += (_, _) => Theme.ApplyFrame(this);
+        SourceInitialized += (_, _) => Theme.ApplyFrame(this, _pinned);
+        Activated += (_, _) => SeenAll();   // the unread badge clears once the user is back in the window
         StateChanged += (_, _) =>
         {
             _max.Content = WindowState == WindowState.Maximized ? Glyph_Restore : Glyph_Max;
@@ -89,7 +93,8 @@ sealed partial class MainWindow : Window
         var titleBlock = new TextBlock { Text = "Lan-Line", FontSize = 14, FontWeight = FontWeights.SemiBold };
         titleBlock.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         _status.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
-        var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        var statusRow = new DockPanel { Margin = new Thickness(0, 3, 0, 0) };   // a DockPanel, so a long status ends in "…" in a narrow window (a StackPanel just cut it off)
+        DockPanel.SetDock(_dot, Dock.Left);
         statusRow.Children.Add(_dot);
         statusRow.Children.Add(_status);
         statusRow.Background = Brushes.Transparent;   // hit-testable: right-click for the menu
@@ -97,13 +102,17 @@ sealed partial class MainWindow : Window
         statusRow.ToolTip = "Right-click for pairing and Keep on top";
         statusRow.MouseLeftButtonUp += (_, _) => { if (!_connected && !_pairing) { statusRow.ContextMenu.PlacementTarget = statusRow; statusRow.ContextMenu.IsOpen = true; } };
         WindowChrome.SetIsHitTestVisibleInChrome(statusRow, true);
-        var titleStack = new StackPanel { Margin = new Thickness(16, 9, 0, 0) };
-        titleStack.Children.Add(titleBlock);
-        titleStack.Children.Add(statusRow);
+        var titleInner = new StackPanel();
+        titleInner.Children.Add(titleBlock);
+        titleInner.Children.Add(statusRow);
+        var titleStack = Scrimmed(titleInner, 8);   // readable on a very see-through window (design refresh, beta.10)
+        titleStack.Margin = new Thickness(10, 6, 0, 0); titleStack.Padding = new Thickness(6, 3, 8, 4);
+        titleStack.VerticalAlignment = VerticalAlignment.Top;
 
         var min = new Button { Content = Glyph_Min, ToolTip = "Minimize" };
         var close = new Button { Content = Glyph_Close, ToolTip = "Close" };
-        foreach (var b in new[] { _pin, min, _max }) b.SetResourceReference(StyleProperty, "CaptionButton");
+        foreach (var b in new[] { min, _max }) b.SetResourceReference(StyleProperty, "CaptionButton");
+        _pin.SetResourceReference(StyleProperty, "PinButton");
         close.SetResourceReference(StyleProperty, "CloseButton");
         _pin.Click += (_, _) => { _pinned = !_pinned; ApplyPin(); };
         min.Click += (_, _) => WindowState = WindowState.Minimized;
@@ -111,7 +120,7 @@ sealed partial class MainWindow : Window
         close.Click += (_, _) => UserClose();
         _max.ToolTip = "Maximize";
         Automation(_pin, "Pin on top"); Automation(min, "Minimize"); Automation(_max, "Maximize"); Automation(close, "Close");
-        var caption = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 6, 0) };
+        var caption = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };   // flush with the corner, like every Windows 11 app
         foreach (var b in new[] { _pin, min, _max, close }) { WindowChrome.SetIsHitTestVisibleInChrome(b, true); caption.Children.Add(b); }
 
         var header = new Grid { Height = 52 };
@@ -122,6 +131,7 @@ sealed partial class MainWindow : Window
         header.Children.Add(caption);
         var hairline = new Border { Height = 1 };
         hairline.SetResourceReference(Border.BackgroundProperty, "Hairline");
+        hairline.Opacity = 0.6;
 
         // ---- feed
         _scroll.Content = _feed;
@@ -144,7 +154,16 @@ sealed partial class MainWindow : Window
         DockPanel.SetDock(_send, Dock.Right);
         composerRow.Children.Add(_send);
         composerRow.Children.Add(field);
-        var composer = new Border { CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Padding = new Thickness(12, 0, 6, 0), Margin = new Thickness(12, 6, 12, 12), MinHeight = 40, Child = composerRow };
+        // A Fluent text box (design refresh, beta.10): solid layer fill, 8 px corners, and the accent line along the bottom
+        // while it has the keyboard.
+        var focusLine = new Border { Height = 2, CornerRadius = new CornerRadius(1), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-6, 0, 0, 0), Opacity = 0, IsHitTestVisible = false };
+        focusLine.SetResourceReference(Border.BackgroundProperty, "Accent");
+        var composerGrid = new Grid();
+        composerGrid.Children.Add(composerRow);
+        composerGrid.Children.Add(focusLine);
+        _input.GotKeyboardFocus += (_, _) => focusLine.Opacity = 1;
+        _input.LostKeyboardFocus += (_, _) => focusLine.Opacity = 0;
+        var composer = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(12, 0, 6, 0), Margin = new Thickness(12, 6, 12, 12), MinHeight = 40, Child = composerGrid };
         composer.SetResourceReference(Border.BackgroundProperty, "InputFill");
         composer.SetResourceReference(Border.BorderBrushProperty, "InputStroke");
         composer.MouseLeftButtonDown += (_, _) => _input.Focus();
@@ -212,7 +231,8 @@ sealed partial class MainWindow : Window
         RefreshEmpty();
         Closing += OnClosing;          // close hides to the tray while "Keep running in the tray" is on (beta.9)
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WatchCloseCommands);
-        Closed += (_, _) => RemoveTray();
+        SourceInitialized += (_, _) => { ApplyHotKeys(); ApplyClipboardShare(); };   // global shortcuts, clipboard sharing (beta.10); also when started hidden
+        Closed += (_, _) => { RemoveTray(); _edge?.Close(); };
         if (demo) return;
 
         _args = args;
@@ -225,7 +245,7 @@ sealed partial class MainWindow : Window
     internal static void Automation(DependencyObject o, string name) => System.Windows.Automation.AutomationProperties.SetName(o, name);
 
     /// <summary>Called when the Windows theme changes.</summary>
-    public void ThemeChanged() => Theme.ApplyFrame(this);
+    public void ThemeChanged() => Theme.ApplyFrame(this, _pinned);
 
     // ---------- status, pin, empty state
 
@@ -249,6 +269,7 @@ sealed partial class MainWindow : Window
     void RefreshStatus()
     {
         _dot.SetResourceReference(Shape.FillProperty, _connected ? "Green" : "IdleDot");
+        RefreshDotPulse();
         _status.Text = _pairing ? (_connected ? $"Paired with {_peer}" : "Not paired yet")
             : _connected && Multi ? $"Connected · {_partners.Count(p => p.Up)} of {_partners.Count}"
             : _connected ? $"Connected · {(_peer.Length > 0 ? _peer : "partner")}" : _statusText;
@@ -288,7 +309,8 @@ sealed partial class MainWindow : Window
         Topmost = _pinned;
         _pin.Content = _pinned ? Glyph_Pin : Glyph_Unpin;
         _pin.SetResourceReference(ForegroundProperty, _pinned ? "PinOn" : "Icon");
-        _pin.ToolTip = _pinned ? "Pinned on top. Click to unpin." : "Keep Lan-Line on top";
+        _pin.ToolTip = _pinned ? "Pinned on top. Click to unpin (Ctrl+P)." : "Keep Lan-Line on top (Ctrl+P)";
+        Theme.ApplyMaterial(this, _pinned);   // floating panel = Acrylic, ordinary window = Mica
         Automation(_pin, _pinned ? "Unpin" : "Pin on top");
     }
 
@@ -296,15 +318,52 @@ sealed partial class MainWindow : Window
 
     FrameworkElement BuildEmptyState()
     {
-        var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, IsHitTestVisible = false, Margin = new Thickness(24) };
-        panel.Children.Add(Mark(15));
+        // The empty window (beta.10): a small picture of two computers passing a file, the headline, and three hints
+        // (Tour.Hints, the Mac's wording in Windows terms). In a short window only the mark, headline and one line show.
+        var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, IsHitTestVisible = false, Margin = new Thickness(20) };
+        var iconFont = (FontFamily)Application.Current.Resources["IconFont"];
+        TextBlock Glyph(string g, double size, string brush, Thickness m)
+        {
+            var t = new TextBlock { Text = g, FontFamily = iconFont, FontSize = size, VerticalAlignment = VerticalAlignment.Center, Margin = m };
+            t.SetResourceReference(TextBlock.ForegroundProperty, brush);
+            return t;
+        }
+        var picture = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        picture.Children.Add(Glyph("\uE7F8", 26, "Text2", new Thickness(0)));            // a laptop
+        picture.Children.Add(Glyph("\uE712", 12, "Text2", new Thickness(6, 0, 2, 0)));    // dots
+        picture.Children.Add(Glyph("\uE8A5", 13, "Accent", new Thickness(2, 0, 2, 0)));   // a document on its way
+        picture.Children.Add(Glyph("\uE712", 12, "Text2", new Thickness(2, 0, 6, 0)));
+        picture.Children.Add(Glyph("\uE977", 26, "Text2", new Thickness(0)));            // a desktop PC
+        var hints = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0) };
+        foreach (var h in Tour.Hints(Tour.Platform.Windows))
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
+            line.Children.Add(Glyph(h.Id switch { "type" => "\uE765", "drop" => "\uE896", _ => "\uE72D" }, 12, "Accent", new Thickness(0, 0, 9, 0)));
+            var text = new TextBlock { Text = h.Text, FontSize = 12 };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            line.Children.Add(text);
+            hints.Children.Add(line);
+        }
+        var mark = Mark(15);
+        panel.Children.Add(picture);
+        panel.Children.Add(mark);
         var t1 = new TextBlock { Text = "Drop here. Grab there.", FontSize = 14, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0) };
         t1.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         var t2 = new TextBlock { FontSize = 12, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
         t2.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
         t2.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(TextBlock.Text)) { Source = _placeholder, Converter = new HintConverter() });
         panel.Children.Add(t1);
+        panel.Children.Add(hints);
         panel.Children.Add(t2);
+        void Fit()
+        {
+            var roomy = _body.ActualHeight == 0 || _body.ActualHeight >= 215;
+            picture.Visibility = hints.Visibility = roomy ? Visibility.Visible : Visibility.Collapsed;
+            mark.Visibility = t2.Visibility = roomy ? Visibility.Collapsed : Visibility.Visible;
+        }
+        _body.SizeChanged += (_, _) => Fit();
+        Fit();
+        System.Windows.Automation.AutomationProperties.SetName(panel, "Nothing here yet. " + string.Join(". ", Tour.Hints(Tour.Platform.Windows).Select(h => h.Text)) + ".");
         return panel;
     }
 
@@ -369,12 +428,31 @@ sealed partial class MainWindow : Window
                 break;
             case HubEvent.Status s: if (!_connected) _statusText = StatusLine(s.Text, s.Partner.Length == 0 ? Away : NameOf(s.Partner)); break;
             case HubEvent.Received r:
+                if (ArrivalNotices.Make([(NameOf(r.Partner), r.Item)]) is { } heard) Announce($"{heard.Title}. {heard.Body}");   // Narrator: say what arrived
+                var notified = ShouldNotify && WinToast.Enabled() != false;
+                if (ShouldNotify) NotifyArrived(NameOf(r.Partner), r.Item);   // before the pop-up: "in use" is the user's own window
+                CountArrival();
+                ChimeArrival(notified);
+                Track(r.Item);
+                Record(r.Item, NameOf(r.Partner));
+                AfterReceive(r.Item);
                 Upsert(r.Item, Multi ? $"from {NameOf(r.Partner)}" : null);
+                if (_rows.TryGetValue(r.Item.Id, out var rr)) rr.Partner = r.Partner;
                 if (r.Item.IsFile && r.Item.Path is { } rp) LogReceived(rp, r.Item.Size);
                 PopUp();
                 break;
-            case HubEvent.Outgoing o: UpsertOutgoing(o.Item); break;
-            case HubEvent.ReceiveFailed f: Note($"Couldn't receive {f.Name}{(Multi ? $" from {NameOf(f.Partner)}" : "")}: {f.Reason}"); PopUp(); break;
+            case HubEvent.Outgoing o: Track(o.Item.Item with { State = o.Item.Summary }); UpsertOutgoing(o.Item); break;
+            case HubEvent.Clipboard cb: ClipReceived(cb.Content); break;
+            case HubEvent.Incoming inc:   // still arriving, or stopped short (beta.10)
+                Track(inc.Item);
+                if (inc.Item.State.Kind == ItemStateKind.Failed) _cardedFailures.Add(inc.Item.Id);   // if a ReceiveFailed for this same item follows, the card already says it
+                Upsert(inc.Item, Multi ? $"from {NameOf(inc.Partner)}" : null);
+                if (_rows.TryGetValue(inc.Item.Id, out var ir)) ir.Partner = inc.Partner;
+                break;
+            case HubEvent.ReceiveFailed f:
+                if (ShouldNotify) NotifyFailed(NameOf(f.Partner), f.Name, f.Reason);
+                if (_cardedFailures.Remove(f.Id)) { PopUp(); break; }   // this item's card already says so
+                Note($"Couldn't receive {f.Name}{(Multi ? $" from {NameOf(f.Partner)}" : "")}: {f.Reason}"); PopUp(); break;
             case HubEvent.Error err: if (!_pairing) Note(err.Message); break;
         }
         RefreshStatus();
@@ -391,6 +469,7 @@ sealed partial class MainWindow : Window
     void UpsertOutgoing(HubItem h)
     {
         var item = h.Item with { State = h.Summary };
+        Record(item, h.Total > 1 ? "everyone" : h.To.Length == 1 ? NameOf(h.To[0]) : null);
         var label = Multi ? (h.Total > 1 ? "to everyone" : h.To.Length == 1 ? $"to {NameOf(h.To[0])}" : null) : null;
         var caption = label == null ? null : h.Total > 1 && h.Summary.Kind != ItemStateKind.Delivered ? $"{label} · ✓ {h.Delivered}/{h.Total}" : label;
         Upsert(item, caption);
@@ -399,6 +478,7 @@ sealed partial class MainWindow : Window
     /// <summary>Something arrived: bring the window back even if it was minimized or behind others.</summary>
     void PopUp()
     {
+        if (!_storage.PopUpOnArrivalValue) return;   // the setting (beta.10); notifications still come
         // WindowState = Normal restores with SW_RESTORE, which also activates the window and takes the
         // keyboard from whatever the user is typing in. SW_SHOWNOACTIVATE restores it without activating;
         // WPF picks the new state up from WM_SIZE. (Windows session fix, test 14.)
@@ -424,6 +504,8 @@ sealed partial class MainWindow : Window
         row.SetCaption(caption);
         _rows[item.Id] = row;
         Append(row.View);
+        if (!_loadingHistory) AnimateIn(row.View, item.Incoming);
+        if (Filtering && !_loadingHistory) RefreshResults();   // a new item that matches shows up in the results too
     }
 
     /// <summary>A passing remark that removes itself after a few seconds.</summary>
@@ -438,32 +520,71 @@ sealed partial class MainWindow : Window
 
     FrameworkElement? _updateRow;
 
-    /// <summary>One quiet, dismissible "Lan-Line X is available · Download ×" row. It opens the release page in the
-    /// browser; Lan-Line never downloads anything itself. A newer notice replaces an older one.</summary>
+    /// <summary>One quiet, dismissible "Lan-Line X is available · Install · Release notes ×" row (beta.10). Install
+    /// fetches the signed update.json, downloads the installer, checks its size and SHA-256, closes Lan-Line and runs
+    /// the installer silently; the installer reopens Lan-Line. Release notes opens the release page.</summary>
     void ShowUpdate(string version, string url)
     {
         if (!Updates.IsAllowedUrl(url)) return;
         if (_updateRow != null) _feed.Children.Remove(_updateRow);
-        var text = new TextBlock { Text = $"Lan-Line {version} is available", FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        var text = new TextBlock { Text = $"Lan-Line {version} is available", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 300 };
         text.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
-        var dl = new Button { Content = "Download", FontSize = 11, Margin = new Thickness(8, 0, 0, 0), ToolTip = url };
-        dl.SetResourceReference(StyleProperty, "LinkButton");
-        dl.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        Button Link(string label, string tip, bool strong = false)
+        {
+            var b = new Button { Content = label, FontSize = 11, Margin = new Thickness(8, 0, 0, 0), ToolTip = tip, FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal };
+            b.SetResourceReference(StyleProperty, "LinkButton");
+            return b;
+        }
+        var install = Link("Install", "Download, check and install the update, then reopen Lan-Line", strong: true);
+        var notes = Link("Release notes", url);
+        notes.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
         var x = new Button { Content = Glyph_Close, FontFamily = (FontFamily)Application.Current.Resources["IconFont"], FontSize = 9, Margin = new Thickness(8, 0, 0, 0), ToolTip = "Dismiss" };
         x.SetResourceReference(StyleProperty, "LinkButton");
         System.Windows.Automation.AutomationProperties.SetName(x, "Dismiss update notice");
-        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 6) };
-        row.Children.Add(text); row.Children.Add(dl); row.Children.Add(x);
+        var rowInner = new StackPanel { Orientation = Orientation.Horizontal };
+        rowInner.Children.Add(text); rowInner.Children.Add(install); rowInner.Children.Add(notes); rowInner.Children.Add(x);
+        var row = Scrimmed(rowInner, 9, HorizontalAlignment.Center);
+        row.Padding = new Thickness(8, 2, 4, 3); row.Margin = new Thickness(0, 2, 0, 6);
         x.Click += (_, _) => { _feed.Children.Remove(row); _updateRow = null; RefreshEmpty(); };
+        install.Click += async (_, _) =>
+        {
+            install.IsEnabled = false; install.Visibility = Visibility.Collapsed;
+            text.Text = "Checking the update…";
+            try
+            {
+                var offer = await SignedUpdate.FetchOffer(MyVersion, SignedUpdate.Platform.Windows)
+                    ?? throw new UpdateException("No signed update for this PC yet. Use Release notes to download it.");
+                var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lan-Line", "update");
+                var file = await SignedUpdate.Download(offer, MyVersion, dir,
+                    f => Dispatcher.BeginInvoke(() => text.Text = $"Downloading Lan-Line {offer.Version}… {(int)(f * 100)}%"));
+                text.Text = "Installing… Lan-Line will reopen";
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /lanlineupdate=1") { UseShellExecute = true });
+                _quitting = true;
+                Close();   // the installer waits for this to exit (its single-instance check), then reopens it
+            }
+            catch (UpdateException e) { text.Text = e.Message; }
+            catch (System.ComponentModel.Win32Exception) { text.Text = "The installer didn't start. Use Release notes to download it."; }
+        };
         _updateRow = row;
         Append(row);
     }
 
     void Note(string s)
     {
-        var t = new TextBlock { Text = s, FontSize = 11, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 2, 0, 6) };
+        var t = new TextBlock { Text = s, FontSize = 11, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
         t.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
-        Append(t);
+        var b = Scrimmed(t, 8, HorizontalAlignment.Center);
+        b.Padding = new Thickness(7, 1, 7, 2); b.Margin = new Thickness(0, 2, 0, 6);
+        Append(b);
+    }
+
+    /// <summary>Text that sits directly on the window body gets a backing (the "Scrim" brush) when the window is very
+    /// see-through: nothing at the default opacity, a soft patch of the body colour below it.</summary>
+    internal static Border Scrimmed(FrameworkElement child, double radius = 8, HorizontalAlignment align = HorizontalAlignment.Left)
+    {
+        var b = new Border { CornerRadius = new CornerRadius(radius), Child = child, HorizontalAlignment = align };
+        b.SetResourceReference(Border.BackgroundProperty, "Scrim");
+        return b;
     }
 
     void Append(FrameworkElement v)
@@ -477,9 +598,6 @@ sealed partial class MainWindow : Window
         RefreshEmpty();
         _scroll.ScrollToEnd();
     }
-
-    internal bool IsOwn(string path) =>
-        _rows.Values.Any(r => r.Path is { } p && string.Equals(System.IO.Path.GetFullPath(p), System.IO.Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase));
 
     // ---------- sending
 
@@ -496,7 +614,7 @@ sealed partial class MainWindow : Window
             RefreshStaged();
             SendFiles(paths);
         }
-        if (hasText) { UpsertOutgoing(_hub.SendText(t, _sendTarget)); _input.Clear(); }
+        if (hasText) { UpsertOutgoing(_hub.SendText(t, _sendTarget)); _input.Clear(); TickSent(); }
     }
 
     void RefreshSend()
@@ -547,22 +665,29 @@ sealed partial class MainWindow : Window
         RefreshSend();
     }
 
-    void SendFiles(IEnumerable<string> paths)
+    /// <summary>Returns how many went out, so the callers that confirm with a notification only say "Sent" when
+    /// something was. (A chip dragged out of this window and back is stopped in OnDrop; anything else the user
+    /// picks is sent, including a file received or sent earlier.)</summary>
+    int SendFiles(IEnumerable<string> paths)
     {
-        if (_hub == null || _pairing) return;
-        if (_partners.Count == 0) { Note("Not paired yet: nothing was sent"); return; }
+        if (_hub == null || _pairing) return 0;
+        if (_partners.Count == 0) { Note("Not paired yet: nothing was sent"); return 0; }
+        var sent = 0;
         foreach (var p in paths)
         {
-            if (IsOwn(p)) continue;
             if (Directory.Exists(p))
             {
                 var skipped = Session.ScanFolder(p).Skipped;
                 UpsertOutgoing(_hub.SendFolder(p, _sendTarget));
+                sent++;
                 if (skipped > 0) Note($"{System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(p))}: {skipped} shortcut{(skipped == 1 ? "" : "s")} (links) left out");
                 continue;
             }
-            if (File.Exists(p)) UpsertOutgoing(_hub.SendFile(p, _sendTarget));
+            if (File.Exists(p)) { UpsertOutgoing(_hub.SendFile(p, _sendTarget)); sent++; }
+            else Note($"Couldn't find {System.IO.Path.GetFileName(p)}: not sent");
         }
+        if (sent > 0) TickSent();
+        return sent;
     }
 
     void OnInputKey(object sender, KeyEventArgs e)

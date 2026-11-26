@@ -33,6 +33,12 @@ public struct Frame: Codable, Sendable, Equatable {
     public var latestKnown: LatestKnown?
     /// hello / hello_ok (beta.7+): this computer's device id, so a partner can be recognised after it moves.
     public var device: String?
+    /// `clip` (beta.10, "clip" cap): a picture from the other computer's clipboard, PNG, base64.
+    public var png: String?
+    /// beta.10 ("resume" cap): `file_begin` with `resume: true` offers to continue an interrupted file; the receiver
+    /// answers `resume` with the `offset` it already has (0 = from the start).
+    public var resume: Bool?
+    public var offset: Int64?
 
     public struct LatestKnown: Codable, Sendable, Equatable {
         public var version: String
@@ -41,7 +47,7 @@ public struct Frame: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, v, token, name, id, text, size, sha256, ok, err, rekey, addrs, nonce, epk, mac, caps, folder, path, count, version, device
+        case type, v, token, name, id, text, size, sha256, ok, err, rekey, addrs, nonce, epk, mac, caps, folder, path, count, version, device, png, resume, offset
         case latestKnown = "latest_known"
     }
 
@@ -72,17 +78,27 @@ public struct Frame: Codable, Sendable, Equatable {
     public static func fileBegin(id: String, name: String, size: Int64, sha256: String?, folder: String? = nil, path: String? = nil) -> Frame {
         Frame(type: "file_begin", name: name, id: id, size: size, sha256: sha256, folder: folder, path: path)
     }
+    /// The answer to a resumable `file_begin`: carry on from this byte.
+    public static func resumeAt(id: String, offset: Int64) -> Frame { var f = Frame(type: "resume", id: id); f.offset = offset; return f }
     public static func fileEnd(id: String, sha256: String? = nil) -> Frame { Frame(type: "file_end", id: id, sha256: sha256) }
     public static func folderBegin(id: String, name: String, count: Int, size: Int64) -> Frame {
         Frame(type: "folder_begin", name: name, id: id, size: size, count: count)
     }
     public static func mkdir(folder: String, path: String) -> Frame { Frame(type: "mkdir", folder: folder, path: path) }
     public static func folderEnd(id: String) -> Frame { Frame(type: "folder_end", id: id) }
+    /// beta.10 ("cancel" cap): the sender stopped this file or folder; the receiver deletes what arrived.
+    public static func cancel(id: String) -> Frame { Frame(type: "cancel", id: id) }
     public static func versionInfo(_ own: String, latest: LatestKnown?) -> Frame {
         var f = Frame(type: "version"); f.version = own; f.latestKnown = latest; return f
     }
     public static func ack(id: String, ok: Bool, err: String? = nil) -> Frame { Frame(type: "ack", id: id, ok: ok, err: err) }
     public static let beat = Frame(type: "beat")
+    /// beta.10 ("clip" cap): the sender's clipboard changed. Text or a PNG; may come between file chunks like `ack`.
+    public static func clip(_ c: ClipContent) -> Frame {
+        var f = Frame(type: "clip", id: UUID().uuidString)
+        switch c { case .text(let t): f.text = t; case .png(let d): f.png = d.base64EncodedString() }
+        return f
+    }
 
     public var json: String {
         // Encoding a struct of strings, numbers and bools cannot fail.

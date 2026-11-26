@@ -37,6 +37,8 @@ sealed partial class MainWindow
                 if (e.Button == System.Windows.Forms.MouseButtons.Left) ShowFromTray();
                 else if (e.Button == System.Windows.Forms.MouseButtons.Right) OpenTrayMenu();
             };
+            // the fallback when Windows refuses toasts (beta.10): a click shows the window at that item
+            _tray.BalloonTipClicked += (_, _) => { var id = _balloonItem; _balloonItem = null; HandleLink(ArrivalNotices.Link(NoticeAction.Show, id)); };
             RefreshTray();
         }
         else if (!KeepRunning && _tray != null)
@@ -85,6 +87,7 @@ sealed partial class MainWindow
     {
         Hide();
         if (_storage.TrayHintShown || _trayDemo) return;
+        _balloonItem = null;
         _tray?.ShowBalloonTip(8000, "Lan-Line is still running",
             "It keeps receiving in the notification area by the clock (under ^ if Windows tucked it away). Right-click it to exit.",
             System.Windows.Forms.ToolTipIcon.None);
@@ -111,20 +114,27 @@ sealed partial class MainWindow
     void RefreshTray()
     {
         if (_tray == null) return;
-        _tray.Icon = _connected ? _trayOn : _trayOff;
-        var text = $"Lan-Line · {_status.Text}";
+        _tray.Icon = TrayIconNow();
+        var text = _unread.Phrase is { } p ? $"Lan-Line · {p} · {_status.Text}" : $"Lan-Line · {_status.Text}";
         _tray.Text = text.Length > 120 ? text[..119] + "…" : text;
     }
 
     ContextMenu TrayMenu()
     {
         var m = new ContextMenu();
-        m.Items.Add(new MenuItem { Header = new TextBlock { Text = _status.Text }, IsEnabled = false });   // no _ access keys
+        var line = _unread.Phrase is { } p ? $"{p} · {_status.Text}" : _status.Text;
+        m.Items.Add(new MenuItem { Header = new TextBlock { Text = line }, IsEnabled = false });   // no _ access keys
         m.Items.Add(new Separator());
         Add("Show Lan-Line", ShowFromTray);
         Add("Pair with another computer…", () => { ShowFromTray(); if (_hub != null) BeginPairing(show: false); });
         Add("Settings…", () => { ShowFromTray(); ShowSettings(); });
         Add("Check for updates…", () => _ = CheckForUpdates(manual: true));
+        if (_storage.ShareClipboardValue)
+        {
+            var pause = new MenuItem { Header = "Pause clipboard sharing", IsCheckable = true, IsChecked = _clipPaused };
+            pause.Click += (_, _) => _clipPaused = pause.IsChecked;
+            m.Items.Add(pause);
+        }
         m.Items.Add(new Separator());
         Add("Exit Lan-Line", Quit);
         return m;

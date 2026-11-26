@@ -22,7 +22,8 @@ final class Recorder: @unchecked Sendable {
         for case .outgoing(let i) in all.reversed() where i.id == id { return i.state }
         return nil
     }
-    var receiveFailures: [String] { all.compactMap { if case .receiveFailed(_, let r) = $0 { return r }; return nil } }
+    var receiveFailures: [String] { all.compactMap { if case .receiveFailed(_, let r, _) = $0 { return r }; return nil } }
+    var receiveFailureIDs: [String] { all.compactMap { if case .receiveFailed(_, _, let i) = $0 { return i }; return nil } }
 }
 
 final class FakeClock: @unchecked Sendable {

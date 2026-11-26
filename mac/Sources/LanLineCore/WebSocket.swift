@@ -74,12 +74,19 @@ enum WSFrame {
 struct WSParser {
     let expectMasked: Bool      // true on the server side: every client frame must be masked
     let maxMessage: Int
+    /// The first message on a connection is the hello (or its answer): small. Until one whole message has
+    /// arrived, nothing bigger than this is buffered, so a stranger can't make the listener hold megabytes.
+    let firstMessage: Int
+    private var gotMessage = false
+    private var limit: Int { gotMessage ? maxMessage : min(firstMessage, maxMessage) }
     private var buf: [UInt8] = []
     private var pos = 0
     private var fragOp: WSOpcode?
     private var frag = Data()
 
-    init(expectMasked: Bool, maxMessage: Int) { self.expectMasked = expectMasked; self.maxMessage = maxMessage }
+    init(expectMasked: Bool, maxMessage: Int, firstMessage: Int? = nil) {
+        self.expectMasked = expectMasked; self.maxMessage = maxMessage; self.firstMessage = firstMessage ?? maxMessage
+    }
 
     mutating func feed(_ bytes: UnsafeRawBufferPointer) throws -> [WSEvent] {
         buf.append(contentsOf: bytes)
@@ -113,14 +120,14 @@ struct WSParser {
                 guard avail >= 10 else { break }
                 var v: UInt64 = 0
                 for i in 0..<8 { v = v << 8 | UInt64(buf[pos + 2 + i]) }
-                guard v >> 63 == 0, v <= UInt64(maxMessage) else { throw WSError(code: 1009, description: "frame too big") }
+                guard v >> 63 == 0, v <= UInt64(limit) else { throw WSError(code: 1009, description: "frame too big") }
                 len = Int(v)
                 head = 10
             }
             if op.rawValue >= 8 {
                 guard fin, len <= 125 else { throw WSError(code: 1002, description: "bad control frame") }
             }
-            guard len <= maxMessage else { throw WSError(code: 1009, description: "frame too big") }
+            guard len <= limit else { throw WSError(code: 1009, description: "frame too big") }
             let maskLen = masked ? 4 : 0
             guard avail >= head + maskLen + len else { break }
             let payloadStart = pos + head + maskLen
@@ -139,15 +146,16 @@ struct WSParser {
                 events.append(.close(code: code))
             case .text, .binary:
                 guard fragOp == nil else { throw WSError(code: 1002, description: "new message inside a fragmented one") }
-                if fin { events.append(try message(op, payload)) } else { fragOp = op; frag = payload }
+                if fin { events.append(try message(op, payload)); gotMessage = true } else { fragOp = op; frag = payload }
             case .continuation:
                 guard let fop = fragOp else { throw WSError(code: 1002, description: "continuation without a start") }
-                guard frag.count + payload.count <= maxMessage else { throw WSError(code: 1009, description: "message too big") }
+                guard frag.count + payload.count <= limit else { throw WSError(code: 1009, description: "message too big") }
                 frag.append(payload)
                 if fin {
                     let whole = frag
                     fragOp = nil; frag = Data()
                     events.append(try message(fop, whole))
+                    gotMessage = true
                 }
             }
         }

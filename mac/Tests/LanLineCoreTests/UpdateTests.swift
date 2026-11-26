@@ -125,4 +125,12 @@ final class UpdateTests: XCTestCase {
         XCTAssertEqual(a.version.description, version)
         XCTAssertTrue(a.url.hasSuffix("/v\(version)"))
     }
+
+    /// beta.10 is the first two-digit beta: it must sort after beta.9 (numbers, not text), and be offered as an update.
+    func testTwoDigitBetaSortsAfterBetaNine() {
+        let b9 = LanLineVersion("0.9.0-beta.9")!, b10 = LanLineVersion("0.9.0-beta.10")!
+        XCTAssertTrue(b9 < b10)
+        XCTAssertFalse(b10 < b9)
+        XCTAssertTrue(LanLineVersion("0.9.0-beta.10")! < LanLineVersion("0.9.0")!, "a beta comes before its release")
+    }
 }

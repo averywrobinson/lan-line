@@ -15,7 +15,8 @@ public sealed class SessionConfig
 {
     public required string Token { get; init; }
     public required string Name { get; init; }
-    public required string DownloadDir { get; init; }
+    /// <summary>Changed only on the session's queue (Session.SetDownloadDir, beta.10).</summary>
+    public required string DownloadDir { get; set; }
     public TimeSpan BeatInterval { get; init; } = TimeSpan.FromSeconds(15);
     public TimeSpan DeadAfter { get; init; } = TimeSpan.FromSeconds(45);
     public TimeSpan HelloTimeout { get; init; } = TimeSpan.FromSeconds(10);
@@ -27,14 +28,20 @@ public sealed class SessionConfig
     /// <summary>Keep this much free on the receiving disk after a file lands.</summary>
     public long DiskReserve { get; init; } = 64L << 20;
     /// <summary>Tests: pretend the download disk has this many bytes free.</summary>
-    public long? FreeSpaceOverride { get; init; }
+    public long? FreeSpaceOverride { get; set; }
     /// <summary>Listener, while pairing: answer the first good hello with a fresh 32-byte secret (rekey) and switch
     /// to it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.</summary>
     public bool RekeyOnPair { get; init; }
     /// <summary>Listener: addresses to tell an authenticated dialer about (its fallbacks).</summary>
     public string[] Advertise { get; init; } = [];
     /// <summary>What this side tells its peer it can do (PROTOCOL.md "Capabilities"). Tests set [] to act like beta.5.</summary>
-    public string[] Caps { get; init; } = ["sha_end", "folders", "multi"];
+    public string[] Caps { get; init; } = ["sha_end", "folders", "multi", "cancel", "clip", "resume"];
+    /// <summary>How long a half-received file is kept for the sender to resume ("resume" cap, beta.10).</summary>
+    public TimeSpan PartialKeep { get; init; } = TimeSpan.FromHours(2);
+    /// <summary>An incoming item gets a progress card once it has been arriving this long (small files never flicker).</summary>
+    public TimeSpan ProgressDelay { get; init; } = TimeSpan.FromSeconds(0.3);
+    /// <summary>At most one progress event per item this often (plus one per whole percent at the most).</summary>
+    public TimeSpan ProgressInterval { get; init; } = TimeSpan.FromSeconds(0.25);
     /// <summary>This computer's device id, sent in hello / hello_ok (beta.7+).</summary>
     public string DeviceId { get; init; } = "";
     /// <summary>A listener that owns no socket: the Hub accepts connections and hands this Session its partner's.</summary>
@@ -47,7 +54,8 @@ public sealed class SessionConfig
     public TimeSpan TickInterval { get; init; } = TimeSpan.FromSeconds(1);
 }
 
-public enum ItemStateKind { Waiting, Sending, Sent, Delivered, Failed, Received }
+/// <summary>Receiving: an incoming file or folder still arriving (Progress 0…1); Cancelled: stopped by either side (beta.10).</summary>
+public enum ItemStateKind { Waiting, Sending, Sent, Delivered, Failed, Received, Receiving, Cancelled }
 
 public sealed record ItemState(ItemStateKind Kind, double Progress = 0, string? Error = null)
 {
@@ -55,6 +63,7 @@ public sealed record ItemState(ItemStateKind Kind, double Progress = 0, string? 
     public static readonly ItemState Sent = new(ItemStateKind.Sent);
     public static readonly ItemState Delivered = new(ItemStateKind.Delivered);
     public static readonly ItemState ReceivedState = new(ItemStateKind.Received);
+    public static readonly ItemState CancelledState = new(ItemStateKind.Cancelled);
 }
 
 /// <summary>A text (Text set), a file (FileName/Path set) or a folder (also Count: how many files inside).</summary>
@@ -85,7 +94,13 @@ public abstract record SessionEvent
     public sealed record Disconnected(string Reason) : SessionEvent;
     public sealed record Received(Item Item) : SessionEvent;
     public sealed record Outgoing(Item Item) : SessionEvent;
-    public sealed record ReceiveFailed(string Name, string Reason) : SessionEvent;
+    /// <summary>An incoming file or folder still arriving (Receiving), or stopped before it finished (Failed,
+    /// Cancelled); Received follows when it lands (beta.10). Only items that take a moment get these.</summary>
+    public sealed record Incoming(Item Item) : SessionEvent;
+    /// <summary>The other computer's clipboard changed (clipboard sharing, beta.10). Never queued or kept.</summary>
+    public sealed record Clipboard(ClipContent Content) : SessionEvent;
+    /// <summary>Id: the item that failed (the same id its progress card had, if it had one).</summary>
+    public sealed record ReceiveFailed(string Name, string Reason, string Id = "") : SessionEvent;
     public sealed record Error(string Message) : SessionEvent;
     /// <summary>Diagnostics while not connected (which host is being dialed, why a dial failed).</summary>
     public sealed record Status(string Text) : SessionEvent;
@@ -105,11 +120,28 @@ public sealed class Session : IDisposable
     readonly Action<SessionEvent> _handler;
     readonly Func<DateTime> _now;
 
-    sealed class Out { public required Item Item; public string? Sha; public bool Hashing; public bool OnWire; public List<FolderEntry> Entries = []; }
+    sealed class Out
+    {
+        public required Item Item; public string? Sha; public bool Hashing; public bool OnWire; public List<FolderEntry> Entries = [];
+        /// <summary>The link dropped while this file was streaming: offer to resume it ("resume" cap, beta.10).</summary>
+        public bool Resumable;
+    }
+    /// <summary>A half-received single file kept after a dropped link, for the sender to resume (beta.10).</summary>
+    internal sealed record Partial(string Name, long Size, string Part, long Received, DateTime At);
+    readonly Dictionary<string, Partial> _partials = [];
+    /// <summary>Receiver: a kept partial is being read back from disk (off this queue) to rebuild its hash; "resume"
+    /// is answered when that is done.</summary>
+    (string Id, Partial Partial, Link Link)? _rehashing;
+    /// <summary>Sender: the part the receiver already has is being hashed (off this queue) before the rest is streamed.</summary>
+    (string Id, Link Link)? _hashingPrefix;
+    /// <summary>Sender: a resumable file_begin went out; waiting for the receiver's "resume" answer.</summary>
+    (string Id, string Path, long Size, Link Link)? _awaitingResume;
     sealed class InFile
     {
         public required string Id, Name; public string? Sha; public long Size;
         public string? Folder, Dir; public bool Acked;
+        /// <summary>A single file: the folder it is saved in, fixed when it began.</summary>
+        public string? Dest;
         public string? Part; public FileStream? Stream; public IncrementalHash Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         public long Received; public string? Reject;
     }
@@ -117,8 +149,17 @@ public sealed class Session : IDisposable
     {
         public required string Id, Name; public int Count; public long Size;
         public string? Stage; public int Files; public long Bytes; public string? Reject; public bool Acked;
+        /// <summary>The folder it is saved in, fixed when it began.</summary>
+        public string? Dest;
     }
     InFolder? _inFolder;
+    /// <summary>The top-level incoming item (a file, or a whole folder) and how far it is, for progress cards (beta.10).</summary>
+    sealed class InProgress
+    {
+        public required Item Item; public long Total; public DateTime Started;
+        public long Done; public bool Shown; public DateTime LastEmit = DateTime.MinValue; public int LastPct = -1;
+    }
+    InProgress? _progress;
     HashSet<string> _peerCaps = [];
     string _peerName = "the other computer";
     Updates.Available? _latestKnown;
@@ -138,6 +179,9 @@ public sealed class Session : IDisposable
 
     readonly List<Out> _out = [];
     bool _busy;
+    /// <summary>Which item has the wire. A cancel or a refusal can free the wire while one of the item's writes is
+    /// still finishing; that late completion must not free it a second time (the next item already has it).</summary>
+    string? _wireItem;
     FileSend? _fileSend;   // the file currently streaming out
     const int Window = 4;  // chunks in flight: keeps a LAN busy, memory stays Window × ChunkSize
 
@@ -147,7 +191,7 @@ public sealed class Session : IDisposable
         public IncrementalHash? Hasher;       // set when the SHA-256 goes in file_end
         public long Base, Total;              // progress across a folder
         public Action? Next;                  // inside a folder: what comes after this file
-        public int InFlight; public long SentBytes; public bool Eof; public int LastStep = -1;
+        public int InFlight; public long SentBytes; public bool Eof; public int LastStep = -1; public DateTime LastEmit = DateTime.MinValue;
     }
     InFile? _in;
     readonly HashSet<string> _done = [];
@@ -170,6 +214,12 @@ public sealed class Session : IDisposable
 
     public void Stop()
     {
+        foreach (var p in StopKeepingPartials().Values) try { File.Delete(p.Part); } catch (Exception) { }   // quitting: nothing to resume
+    }
+
+    /// <summary>Stop, but hand back the half-received files still worth resuming: the Hub replaces a partner's Session
+    /// when its address changes, and the Session that takes over carries on with them (AdoptPartials).</summary>
+    internal Dictionary<string, Partial> StopKeepingPartials() =>
         _q.Sync(() =>
         {
             _stopped = true;
@@ -178,12 +228,78 @@ public sealed class Session : IDisposable
             foreach (var l in _pending.Keys.ToList()) l.Close("stopped");
             _pending.Clear();
             _dialing?.Close("stopped"); _dialing = null;
-            _link?.Close("stopped");
-            return 0;
+            _link?.Close("stopped");   // LinkDown shelves a file in mid-air and a part being rehashed
+            ShelveRehash();
+            var kept = new Dictionary<string, Partial>(_partials);
+            _partials.Clear();
+            return kept;
         });
+
+    /// <summary>Take over another Session's kept partials (before Start).</summary>
+    internal void AdoptPartials(Dictionary<string, Partial> kept) =>
+        _q.Post(() => { foreach (var (id, p) in kept) _partials.TryAdd(id, p); });
+
+    /// <summary>Tests: change what the receiver believes is free on its disk.</summary>
+    internal void SetFreeSpaceForTests(long? bytes) => _q.Post(() => Config.FreeSpaceOverride = bytes);
+
+    /// <summary>Left over from a run that ended without cleaning up (a crash, a kill, power loss): this app's hidden
+    /// part files and folders, ".&lt;name&gt;.&lt;8 hex digits&gt;.part", untouched for longer than a partial is ever kept.
+    /// Returns how many it removed.</summary>
+    public static int SweepOrphans(string dir, TimeSpan olderThan, DateTime? now = null)
+    {
+        var t = now ?? DateTime.UtcNow;
+        var removed = 0;
+        string[] entries;
+        try { entries = Directory.GetFileSystemEntries(dir, ".*.part"); } catch (Exception) { return 0; }
+        foreach (var path in entries)
+        {
+            if (!IsPartName(Path.GetFileName(path))) continue;
+            try
+            {
+                var isDir = Directory.Exists(path);
+                var made = isDir ? Directory.GetLastWriteTimeUtc(path) : File.GetLastWriteTimeUtc(path);
+                if (t - made <= olderThan) continue;
+                if (isDir) Directory.Delete(path, true); else File.Delete(path);
+                removed++;
+            }
+            catch (Exception) { }
+        }
+        return removed;
+    }
+
+    internal static bool IsPartName(string name)
+    {
+        if (!name.StartsWith('.') || !name.EndsWith(".part", StringComparison.Ordinal)) return false;
+        var stem = name[..^5];   // ".<name>.<8 hex>"
+        var dot = stem.LastIndexOf('.');
+        return stem.Length >= 11 && dot > 1 && stem.Length - dot - 1 == 8 && stem[(dot + 1)..].All(Uri.IsHexDigit);
     }
 
     public void Dispose() { Stop(); if (_ownsQueue) _q.Dispose(); }
+
+    /// <summary>Save files that arrive from now on in another folder (beta.10: the folder setting, a folder per computer).
+    /// A file already arriving finishes where it started.</summary>
+    public void SetDownloadDir(string dir) => _q.Post(() => Config.DownloadDir = dir);
+
+    /// <summary>Send the clipboard (beta.10): straight away, only while connected and only to a side with the "clip" cap.
+    /// Never queued. Calls back whether it went out.</summary>
+    public void SendClip(ClipContent c, Action<bool>? done = null) => _q.Post(() =>
+    {
+        if (!_linkUp || _link is not { } l || !_peerCaps.Contains("clip") || !ClipRules.Fits(c)) { done?.Invoke(false); return; }
+        l.SendText(Frame.Clip(c).Json, ok => done?.Invoke(ok));
+    });
+
+    /// <summary>Whether the connected side can take clipboard items (null while not connected).</summary>
+    public void PeerTakesClips(Action<bool?> result) => _q.Post(() => result(_linkUp ? _peerCaps.Contains("clip") : null));
+
+    /// <summary>Stop an outgoing item (beta.10): a queued one is dropped; one on the wire stops at once and the
+    /// receiver throws away what arrived (cancel to a beta.10 peer; an early file_end / folder_end to an older one,
+    /// which it refuses as a size mismatch). An item already fully sent can't be called back.</summary>
+    public void Cancel(string id) => _q.Post(() => CancelOnQueue(id));
+
+    /// <summary>Refuse the incoming file or folder that is arriving (beta.10): the sender stops (the same ack ok:false
+    /// a full disk gives, which every version understands) and the part files are deleted.</summary>
+    public void CancelIncoming(string id) => _q.Post(() => CancelIncomingOnQueue(id));
 
     public Item SendText(string text)
     {
@@ -261,6 +377,8 @@ public sealed class Session : IDisposable
 
     void StartOnQueue()
     {
+        var sweepDir = Config.DownloadDir; var sweepAge = Config.PartialKeep + TimeSpan.FromMinutes(10);
+        _ = Task.Run(() => SweepOrphans(sweepDir, sweepAge));
         if (Config.TickInterval > TimeSpan.Zero)
             _timer = new Timer(_ => _q.Post(TickOnQueue), null, Config.TickInterval, Config.TickInterval);
         switch (Role)
@@ -297,11 +415,14 @@ public sealed class Session : IDisposable
         HandleHello(hello, l);
     }
 
+    /// <summary>Connections that haven't said hello yet (each is dropped after 10 s): no more than this at once.</summary>
+    internal const int MaxPending = 32;
+
     internal static bool IsDeviceId(string s) => s.Length is >= 8 and <= 64 && s.All(c => c < 128 && (char.IsLetterOrDigit(c) || c == '-'));
 
     void Accept(WebSocket ws, string peer)
     {
-        if (_stopped) { ws.Abort(); return; }
+        if (_stopped || _pending.Count >= MaxPending) { ws.Abort(); return; }   // strangers can't pile up connections
         var l = Link.Accepted(ws, peer, _q, _now(), OnLinkEvent);
         _pending[l] = true;
     }
@@ -450,7 +571,7 @@ public sealed class Session : IDisposable
         BecomeUp(l, f.Name ?? l.Peer);
     }
 
-    static bool IsIPv4(string a) =>
+    internal static bool IsIPv4(string a) =>
         System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && a.Count(c => c == '.') == 3;
 
     void BecomeUp(Link l, string peer)
@@ -470,9 +591,24 @@ public sealed class Session : IDisposable
         _link = null;
         _linkUp = false;
         _busy = false;
+        _wireItem = null;
+        _hashingPrefix = null;
+        ShelveRehash();
         if (_fileSend is { } fsend) { fsend.Fs.Dispose(); _fileSend = null; }
-        AbortIncoming();   // a half-received file is thrown away; the sender resends it
+        // A half-received file: kept for the sender to resume ("resume" cap), else thrown away.
+        if (_in is { Folder: null, Reject: null, Part: { } part } kin && kin.Received > 0 && _peerCaps.Contains("resume"))
+        {
+            try { kin.Stream?.Dispose(); } catch (Exception) { }
+            kin.Stream = null;
+            _partials[kin.Id] = new Partial(kin.Name, kin.Size, part, kin.Received, _now());
+            TrimPartials();
+            _in = null;
+        }
+        AbortIncoming();
         DropFolder();
+        _awaitingResume = null;
+        foreach (var o in _out.Where(o => o.OnWire && o.Item.IsFile && !o.Item.IsFolder && o.Item.State.Kind != ItemStateKind.Sent)) o.Resumable = true;
+        EndProgress(new ItemState(ItemStateKind.Failed, Error: "interrupted"));   // sent again after the reconnect
         foreach (var o in _out.Where(o => o.OnWire))
         {
             o.OnWire = false;
@@ -486,6 +622,11 @@ public sealed class Session : IDisposable
     void TickOnQueue()
     {
         var t = _now();
+        foreach (var (id, p) in _partials.Where(kv => t - kv.Value.At > Config.PartialKeep).ToList())
+        {
+            try { File.Delete(p.Part); } catch (Exception) { }
+            _partials.Remove(id);
+        }
         foreach (var l in _pending.Keys.Where(l => t - l.OpenedAt > Config.HelloTimeout).ToList())
         {
             _pending.Remove(l);
@@ -519,15 +660,15 @@ public sealed class Session : IDisposable
                 break;
             case "file_begin" when f.Id != null:
                 AbortIncoming();
-                if (f.Folder == null) DropFolder();
-                BeginFile(f.Id, f.Name ?? "file", f.Size ?? -1, f.Sha256?.ToLowerInvariant(), f.Folder, f.RelPath, l);
+                if (f.Folder == null) { DropFolder(); EndProgress(new ItemState(ItemStateKind.Failed, Error: "interrupted")); }
+                BeginFile(f.Id, f.Name ?? "file", f.Size ?? -1, f.Sha256?.ToLowerInvariant(), f.Folder, f.RelPath, l, resume: f.Resume == true && f.Folder == null);
                 break;
             case "file_end" when f.Id != null && _in is { } file && file.Id == f.Id:
                 _in = null;
                 FinishFile(file, f.Sha256?.ToLowerInvariant(), l);
                 break;
             case "folder_begin" when f.Id != null:
-                AbortIncoming(); DropFolder();
+                AbortIncoming(); DropFolder(); EndProgress(new ItemState(ItemStateKind.Failed, Error: "interrupted"));
                 BeginFolder(f.Id, f.Name ?? "folder", f.Count ?? -1, f.Size ?? -1, l);
                 break;
             case "mkdir" when _inFolder is { Reject: null, Stage: { } stage } d && d.Id == f.Folder:
@@ -555,48 +696,134 @@ public sealed class Session : IDisposable
                 if (LanLineVersion.Parse(f.Version) is { } pv) Consider(new Updates.Available(pv, Updates.ReleasePage(pv)));
                 if (f.LatestKnown is { } lk && LanLineVersion.Parse(lk.Version) is { } kv && Updates.IsAllowedUrl(lk.Url)) Consider(new Updates.Available(kv, lk.Url));
                 break;
+            case "resume" when f.Id != null && _awaitingResume is { } aw && aw.Id == f.Id && ReferenceEquals(aw.Link, l):
+                // beta.10: the receiver has Offset bytes of our interrupted file; send the rest
+                _awaitingResume = null;
+                {
+                    var offset = Math.Clamp(f.Offset ?? 0, 0, aw.Size);
+                    if (offset == 0) { StartFile(f.Id, aw.Path, aw.Size, l); break; }
+                    // Hash what the receiver already has off this queue: on a slow disk that takes longer than the
+                    // dead-link timeout, and beats must keep going meanwhile.
+                    _hashingPrefix = (f.Id, l);
+                    var (rid, rpath, rsize, hashing) = (f.Id, aw.Path, aw.Size, _peerCaps.Contains("sha_end"));
+                    _ = Task.Run(() =>
+                    {
+                        var opened = OpenAt(rpath, offset, hashing);
+                        _q.Post(() => PrefixHashed(rid, rsize, offset, opened));
+                    });
+                }
+                break;
+            case "clip":   // beta.10: the other computer's clipboard (only sent to sides with the "clip" cap)
+                if (f.Text is { } ct && System.Text.Encoding.UTF8.GetByteCount(ct) <= ClipRules.MaxText) Emit(new SessionEvent.Clipboard(new ClipContent.TextClip(ct)));
+                else if (f.Png is { } pb)
+                {
+                    byte[]? d = null;
+                    try { d = Convert.FromBase64String(pb); } catch (FormatException) { }
+                    if (d != null && ClipRules.Fits(new ClipContent.PngClip(d))) Emit(new SessionEvent.Clipboard(new ClipContent.PngClip(d)));
+                }
+                break;
+            case "cancel" when f.Id != null && _rehashing is { } rh && rh.Id == f.Id:
+                // stopped while its kept part was being read back
+                _rehashing = null;
+                try { File.Delete(rh.Partial.Part); } catch (Exception) { }
+                EndProgress(ItemState.CancelledState);
+                break;
+            case "cancel" when f.Id != null && (_progress?.Item.Id == f.Id || _inFolder?.Id == f.Id || _in?.Id == f.Id):
+                // beta.10: the sender stopped this item; throw away what arrived
+                AbortIncoming();
+                if (_inFolder?.Id == f.Id) DropFolder();
+                EndProgress(ItemState.CancelledState);
+                break;
             case "ack" when f.Id != null:
                 var i = _out.FindIndex(o => o.Item.Id == f.Id);
                 if (i < 0) return;
                 var done = _out[i];
                 _out.RemoveAt(i);
-                var st = f.Ok == true ? ItemState.Delivered : new ItemState(ItemStateKind.Failed, Error: f.Err ?? "rejected");
+                var err = f.Err ?? "rejected";
+                var st = f.Ok == true ? ItemState.Delivered
+                       : err.StartsWith("cancelled", StringComparison.Ordinal) ? ItemState.CancelledState
+                       : new ItemState(ItemStateKind.Failed, Error: err);
                 Emit(new SessionEvent.Outgoing(done.Item with { State = st }));
+                if (_awaitingResume?.Id == f.Id) _awaitingResume = null;   // refused instead of resumed
+                if (_hashingPrefix?.Id == f.Id) _hashingPrefix = null;
                 if (_fileSend is { } fsend && fsend.ItemId == f.Id)   // refused while streaming (too big): stop now
                 {
                     _fileSend = null;
                     fsend.Fs.Dispose();
-                    _busy = false;
-                    Pump();
                 }
+                Release(f.Id);
                 break;
         }
     }
 
-    long? FreeSpace()
+    long? FreeSpace(string? dir = null)
     {
         if (Config.FreeSpaceOverride is { } o) return o;
-        try { Directory.CreateDirectory(Config.DownloadDir); return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Config.DownloadDir))!).AvailableFreeSpace; }
+        var d = dir ?? Config.DownloadDir;
+        try { Directory.CreateDirectory(d); return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(d))!).AvailableFreeSpace; }
         catch (Exception) { return null; }
     }
 
     static string Gb(long b) => b >= 1_000_000_000 ? $"{b / 1e9:0.#} GB" : b >= 1_000_000 ? $"{b / 1e6:0.#} MB" : $"{b / 1e3:0.#} KB";
 
-    string? NoSpace(long size) =>
-        FreeSpace() is { } free && size + Config.DiskReserve > free
+    string? NoSpace(long size, string? dir = null) =>
+        FreeSpace(dir) is { } free && size + Config.DiskReserve > free
             ? $"not enough disk space on {Config.Name} (needs {Gb(size)}, {Gb(Math.Max(free - Config.DiskReserve, 0))} free)" : null;
 
     /// <summary>A refusal the receiver can give at once, before any bytes: the sender stops and both windows say why.</summary>
     void RefuseNow(string id, string name, string reason, Link l)
     {
         l.SendText(Frame.Ack(id, false, reason).Json);
-        Emit(new SessionEvent.ReceiveFailed(name, reason));
+        Emit(new SessionEvent.ReceiveFailed(name, reason, id));
     }
 
-    void BeginFile(string id, string raw, long size, string? sha, string? folder, string? path, Link l)
+    /// <summary>The wire is free again, if id is the item that has it (see _wireItem). Starts the next item.</summary>
+    void Release(string id)
+    {
+        if (_wireItem != id) return;
+        _wireItem = null;
+        _busy = false;
+        Pump();
+    }
+
+    /// <summary>A kept part that was being read back goes on the shelf again (the link dropped, or another item came).</summary>
+    void ShelveRehash()
+    {
+        if (_rehashing is not { } r) return;
+        _rehashing = null;
+        _partials[r.Id] = r.Partial;
+    }
+
+    void BeginFile(string id, string raw, long size, string? sha, string? folder, string? path, Link l, bool resume = false)
     {
         var name = Names.Sanitize(raw);
         var f = new InFile { Id = id, Name = name, Sha = sha, Size = size, Folder = folder };
+        if (resume && _partials.Remove(id, out var kept))
+        {
+            if (kept.Size == size && kept.Name == name)   // carry on where the link dropped
+            {
+                var keptDir = Path.GetDirectoryName(kept.Part)!;
+                // Room for the rest is checked now: the check at the first file_begin can be hours old.
+                if (NoSpace(size - kept.Received, keptDir) is { } full)
+                {
+                    try { File.Delete(kept.Part); } catch (Exception) { }
+                    RefuseNow(id, name, full, l);
+                    f.Reject = full; f.Acked = true; _in = f;
+                    return;
+                }
+                // The part's hash is rebuilt from what is on disk, off this queue: a big part on a slow disk takes
+                // longer than the dead-link timeout, and beats must keep going. Rehashed answers.
+                _rehashing = (id, kept, l);
+                _progress = new InProgress { Item = new Item(id, true, null, name, size, Path.Combine(keptDir, name), ItemState.ReceivedState), Total = size, Started = _now(), Done = kept.Received };
+                _ = Task.Run(() =>
+                {
+                    var h = Rehash(kept);
+                    _q.Post(() => Rehashed(id, name, size, sha, h));
+                });
+                return;
+            }
+            try { File.Delete(kept.Part); } catch (Exception) { }
+        }
         if (folder != null)   // a file inside the folder being received
         {
             if (_inFolder is not { Reject: null, Stage: { } stage } d || d.Id != folder) { f.Reject = "not in a folder"; _in = f; return; }
@@ -611,16 +838,58 @@ public sealed class Session : IDisposable
         if (f.Reject == null && sha != null && (sha.Length != 64 || !sha.All(Uri.IsHexDigit))) f.Reject = "bad sha256";
         if (f.Reject == null)
         {
-            try
-            {
-                var dir = f.Dir ?? Config.DownloadDir;
-                Directory.CreateDirectory(dir);
-                f.Part = Path.Combine(dir, $".{f.Name}.{Guid.NewGuid().ToString("N")[..8]}.part");
-                f.Stream = new FileStream(f.Part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16);
-            }
-            catch (Exception e) { f.Reject = $"cannot write: {e.Message}"; }
+            if (folder == null) f.Dest = Config.DownloadDir;   // it finishes where it started, whatever the setting says by then
+            OpenPart(f, f.Dir ?? Config.DownloadDir);
         }
         if (f.Reject is { } why && folder == null) { RefuseNow(id, name, why, l); f.Acked = true; }   // the sender stops now
+        if (resume && f.Reject == null) l.SendText(Frame.ResumeAt(id, 0).Json);   // nothing kept: from the start
+        if (folder == null && f.Reject == null && !_done.Contains(id))   // a resend of something already saved gets no card: it ends silently
+            _progress = new InProgress { Item = new Item(id, true, null, name, size, Path.Combine(Config.DownloadDir, name), ItemState.ReceivedState), Total = size, Started = _now() };
+        _in = f;
+    }
+
+    static void OpenPart(InFile f, string dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(dir);
+            f.Part = Path.Combine(dir, $".{f.Name}.{Guid.NewGuid().ToString("N")[..8]}.part");
+            f.Stream = new FileStream(f.Part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16);
+        }
+        catch (Exception e) { f.Reject = $"cannot write: {e.Message}"; }
+    }
+
+    /// <summary>The kept part has been read back (hasher null: it is gone or short). Answer the sender's resume offer.</summary>
+    void Rehashed(string id, string name, long size, string? sha, IncrementalHash? hasher)
+    {
+        if (_rehashing is not { } r || r.Id != id) { hasher?.Dispose(); return; }   // cancelled, replaced or the link dropped: dealt with there
+        _rehashing = null;
+        var (p, l) = (r.Partial, r.Link);
+        if (!ReferenceEquals(l, _link) || !_linkUp) { _partials[id] = p; hasher?.Dispose(); return; }
+        var f = new InFile { Id = id, Name = name, Sha = sha, Size = size, Dest = Path.GetDirectoryName(p.Part)! };
+        if (hasher != null)
+        {
+            try
+            {
+                var w = new FileStream(p.Part, FileMode.Open, FileAccess.Write, FileShare.None, 1 << 16);
+                w.SetLength(p.Received);
+                w.Seek(0, SeekOrigin.End);
+                f.Part = p.Part; f.Stream = w; f.Hasher = hasher; f.Received = p.Received;
+                _in = f;
+                l.SendText(Frame.ResumeAt(id, p.Received).Json);
+                return;
+            }
+            catch (Exception) { hasher.Dispose(); }
+        }
+        try { File.Delete(p.Part); } catch (Exception) { }   // nothing usable kept: from the start
+        _progress = null;
+        OpenPart(f, f.Dest ?? Config.DownloadDir);
+        if (f.Reject is { } why) { RefuseNow(id, name, why, l); f.Acked = true; }
+        else
+        {
+            l.SendText(Frame.ResumeAt(id, 0).Json);
+            _progress = new InProgress { Item = new Item(id, true, null, name, size, Path.Combine(f.Dest ?? Config.DownloadDir, name), ItemState.ReceivedState), Total = size, Started = _now() };
+        }
         _in = f;
     }
 
@@ -632,10 +901,12 @@ public sealed class Session : IDisposable
         else if (NoSpace(size) is { } r) d.Reject = r;
         else
         {
+            d.Dest = Config.DownloadDir;   // it finishes where it started, whatever the setting says by then
             var stage = Path.Combine(Config.DownloadDir, $".{name}.{Guid.NewGuid().ToString("N")[..8]}.part");
             try { Directory.CreateDirectory(stage); d.Stage = stage; } catch (Exception) { d.Reject = "cannot write"; }
         }
         if (d.Reject is { } why) { RefuseNow(id, name, why, l); d.Acked = true; }
+        else if (!_done.Contains(id)) _progress = new InProgress { Item = new Item(id, true, null, name, size, Path.Combine(Config.DownloadDir, name), ItemState.ReceivedState, count), Total = size, Started = _now() };
         _inFolder = d;
     }
 
@@ -651,24 +922,29 @@ public sealed class Session : IDisposable
         if (d.Reject is { } why)
         {
             if (d.Stage != null) try { Directory.Delete(d.Stage, true); } catch (Exception) { }
+            if (_progress?.Item.Id == d.Id) EndProgress(new ItemState(ItemStateKind.Failed, Error: why));
             if (!d.Acked) RefuseNow(d.Id, d.Name, why, l);
             return;
         }
-        if (d.Stage is not { } stage) return;
-        if (_done.Contains(d.Id))
+        if (d.Stage is not { } stage) { if (_progress?.Item.Id == d.Id) _progress = null; return; }
+        if (_done.Contains(d.Id))   // a resend of something already saved: it had no card (see BeginFolder)
         {
             try { Directory.Delete(stage, true); } catch (Exception) { }
+            if (_progress?.Item.Id == d.Id) _progress = null;
             l.SendText(Frame.Ack(d.Id, true).Json);
             return;
         }
-        var dest = Names.Unique(d.Name, Config.DownloadDir);
-        try { Directory.Move(stage, dest); }
+        var destDir = d.Dest ?? Config.DownloadDir;   // where it started, even if the setting changed meanwhile
+        string dest;
+        try { Directory.CreateDirectory(destDir); dest = Names.Unique(d.Name, destDir); Directory.Move(stage, dest); }
         catch (Exception)
         {
             try { Directory.Delete(stage, true); } catch (Exception) { }
+            if (_progress?.Item.Id == d.Id) EndProgress(new ItemState(ItemStateKind.Failed, Error: "save failed"));   // the card must not stay at "receiving"
             RefuseNow(d.Id, d.Name, "save failed", l);
             return;
         }
+        if (_progress?.Item.Id == d.Id) _progress = null;   // Received replaces the progress card
         _done.Add(d.Id);
         l.SendText(Frame.Ack(d.Id, true).Json);
         Emit(new SessionEvent.Received(new Item(d.Id, true, null, Path.GetFileName(dest), d.Size, dest, ItemState.ReceivedState, d.Count)));
@@ -679,7 +955,7 @@ public sealed class Session : IDisposable
         if (_in is not { } f || f.Reject != null) return;
         f.Received += d.Length;
         if (f.Received > f.Size) { f.Reject = "size mismatch"; DropPart(f); return; }
-        try { f.Stream!.Write(d); f.Hasher.AppendData(d); }
+        try { f.Stream!.Write(d); f.Hasher.AppendData(d); Progressed(d.Length); }
         catch (Exception e) { f.Reject = $"write failed: {e.Message}"; DropPart(f); }
     }
 
@@ -693,6 +969,7 @@ public sealed class Session : IDisposable
 
     void AbortIncoming()
     {
+        ShelveRehash();   // the sender moved on to another item: the kept part waits for a later offer
         if (_in is { } f) DropPart(f);
         _in = null;
     }
@@ -713,35 +990,40 @@ public sealed class Session : IDisposable
                 if (_inFolder is { Reject: null } d && d.Id == f.Folder) d.Reject = $"{f.Name}: {reason}";
                 return;
             }
+            if (_progress?.Item.Id == f.Id) EndProgress(new ItemState(ItemStateKind.Failed, Error: reason));
             if (!f.Acked)
             {
                 l.SendText(Frame.Ack(f.Id, false, reason).Json);
-                Emit(new SessionEvent.ReceiveFailed(f.Name, reason));
+                Emit(new SessionEvent.ReceiveFailed(f.Name, reason, f.Id));
             }
             return;
         }
-        if (f.Part is not { } part) return;
+        if (f.Part is not { } part) { if (f.Folder == null && _progress?.Item.Id == f.Id) _progress = null; return; }
         if (f.Dir is { } fdir)   // inside a folder: put it in place, count it
         {
             try { File.Move(part, Names.Unique(f.Name, fdir)); if (_inFolder != null) _inFolder.Files++; }
             catch (Exception) { try { File.Delete(part); } catch (Exception) { } if (_inFolder != null) _inFolder.Reject = "save failed"; }
             return;
         }
-        if (_done.Contains(f.Id))   // a resend of something we already saved
+        if (_done.Contains(f.Id))   // a resend of something we already saved: it had no card (see BeginFile)
         {
             try { File.Delete(part); } catch (Exception) { }
+            if (_progress?.Item.Id == f.Id) _progress = null;
             l.SendText(Frame.Ack(f.Id, true).Json);
             return;
         }
-        var dest = Names.Unique(f.Name, Config.DownloadDir);
-        try { File.Move(part, dest); }
+        var destDir = f.Dest ?? Config.DownloadDir;   // where it started, even if the setting changed meanwhile
+        string dest;
+        try { Directory.CreateDirectory(destDir); dest = Names.Unique(f.Name, destDir); File.Move(part, dest); }
         catch (Exception e)
         {
             try { File.Delete(part); } catch (Exception) { }
+            if (_progress?.Item.Id == f.Id) EndProgress(new ItemState(ItemStateKind.Failed, Error: "save failed"));   // the card must not stay at "receiving"
             l.SendText(Frame.Ack(f.Id, false, "save failed").Json);
-            Emit(new SessionEvent.ReceiveFailed(f.Name, $"save failed: {e.Message}"));
+            Emit(new SessionEvent.ReceiveFailed(f.Name, $"save failed: {e.Message}", f.Id));
             return;
         }
+        if (_progress?.Item.Id == f.Id) _progress = null;   // Received replaces the progress card
         _done.Add(f.Id);
         l.SendText(Frame.Ack(f.Id, true).Json);
         Emit(new SessionEvent.Received(new Item(f.Id, true, null, Path.GetFileName(dest), f.Size, dest, ItemState.ReceivedState)));
@@ -771,6 +1053,83 @@ public sealed class Session : IDisposable
         Pump();
     }
 
+    /// <summary>On the queue only (tests call it from an event handler to cancel at an exact moment).</summary>
+    internal void CancelOnQueue(string id)
+    {
+        var o = _out.Find(x => x.Item.Id == id);
+        if (o == null) return;
+        if (o.OnWire)
+        {
+            if (o.Item.State.Kind == ItemStateKind.Sent) return;   // all on the wire, waiting for the ack: too late
+            if (_link is not { } l) return;
+            var viaCancel = _peerCaps.Contains("cancel");
+            if (_fileSend is { } fs && fs.ItemId == id)
+            {
+                _fileSend = null;
+                fs.Fs.Dispose();
+                if (viaCancel) l.SendText(Frame.Cancel(id).Json);
+                else
+                {
+                    l.SendText(Frame.FileEnd(fs.Id, null).Json);                    // short: refused as a size mismatch
+                    if (fs.Id != fs.ItemId) l.SendText(Frame.FolderEnd(id).Json);   // and the folder with it
+                }
+            }
+            else if (_awaitingResume?.Id == id || _hashingPrefix?.Id == id)   // waiting for the resume answer, or hashing after it
+            {
+                if (_awaitingResume?.Id == id) _awaitingResume = null;
+                if (_hashingPrefix?.Id == id) _hashingPrefix = null;
+                l.SendText(Frame.Cancel(id).Json);
+            }
+            else if (o.Item.IsFolder) l.SendText((viaCancel ? Frame.Cancel(id) : Frame.FolderEnd(id)).Json);   // between two files
+            else return;   // a text: already sent
+            if (_wireItem == id) { _wireItem = null; _busy = false; }   // a write of this item still finishing won't free the wire again
+        }
+        _out.Remove(o);
+        Emit(new SessionEvent.Outgoing(o.Item with { State = ItemState.CancelledState }));
+        Pump();
+    }
+
+    /// <summary>On the queue only (tests call it from an event handler).</summary>
+    internal void CancelIncomingOnQueue(string id)
+    {
+        if (_progress is not { } p || p.Item.Id != id || _link is not { } l) return;
+        if (_rehashing is { } rh && rh.Id == id)   // stopped while its kept part was being read back
+        {
+            _rehashing = null;
+            try { File.Delete(rh.Partial.Part); } catch (Exception) { }
+        }
+        if (_in is { } f && (f.Id == id || f.Folder == id)) { DropPart(f); f.Reject = "cancelled"; f.Acked = true; }
+        if (_inFolder is { } d && d.Id == id)
+        {
+            if (d.Stage != null) try { Directory.Delete(d.Stage, true); } catch (Exception) { }
+            d.Stage = null; d.Reject = "cancelled"; d.Acked = true;
+        }
+        l.SendText(Frame.Ack(id, false, $"cancelled on {Config.Name}").Json);
+        EndProgress(ItemState.CancelledState);
+    }
+
+    /// <summary>Bytes of the current incoming item landed: show its card once it takes a moment, then keep it moving.</summary>
+    void Progressed(long n)
+    {
+        if (_progress is not { } p) return;
+        p.Done += n;
+        var t = _now();
+        var pct = p.Total > 0 ? (int)(p.Done * 100 / p.Total) : 100;
+        var due = p.Shown ? (pct != p.LastPct && t - p.LastEmit >= Config.ProgressInterval) || t - p.LastEmit >= TimeSpan.FromSeconds(1)
+                          : t - p.Started >= Config.ProgressDelay;
+        if (!due) return;
+        p.Shown = true; p.LastEmit = t; p.LastPct = pct;
+        Emit(new SessionEvent.Incoming(p.Item with { State = new ItemState(ItemStateKind.Receiving, (double)p.Done / Math.Max(p.Total, 1)) }));
+    }
+
+    /// <summary>The incoming item stopped short: tell the window if it was showing a card.</summary>
+    void EndProgress(ItemState state)
+    {
+        if (_progress is not { } p) return;
+        _progress = null;
+        if (p.Shown) Emit(new SessionEvent.Incoming(p.Item with { State = state }));
+    }
+
     void Fail(string id, string reason)
     {
         if (_out.Find(x => x.Item.Id == id) is { } o)
@@ -778,14 +1137,16 @@ public sealed class Session : IDisposable
             _out.Remove(o);
             Emit(new SessionEvent.Outgoing(o.Item with { State = new ItemState(ItemStateKind.Failed, Error: reason) }));
         }
-        _busy = false;
+        if (_wireItem == id) { _wireItem = null; _busy = false; }
         Pump();
     }
 
     /// <summary>Put the next queued item on the wire: one item at a time, in order.</summary>
     void Pump()
     {
-        if (!_linkUp || _busy || _link is not { } l) return;
+        // A "sendonly" peer (the iPhone's share sheet, beta.10) only hands things over: what is queued for that
+        // device waits for the app itself to connect.
+        if (!_linkUp || _busy || _link is not { } l || _peerCaps.Contains("sendonly")) return;
         var o = _out.Find(x => !x.OnWire);
         if (o == null) return;
         var item = o.Item;
@@ -802,6 +1163,7 @@ public sealed class Session : IDisposable
         }
         o.OnWire = true;
         _busy = true;
+        _wireItem = item.Id;
         if (!item.IsFile)
         {
             l.SendText(Frame.TextItem(item.Id, item.Text!).Json, ok => Wrote(item.Id, l, ok));
@@ -814,21 +1176,98 @@ public sealed class Session : IDisposable
             FolderStep(item.Id, o.Entries, 0, 0, item.Size, l);
             return;
         }
-        FileStream fs;
-        try { fs = new FileStream(item.Path!, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16); }
+        long size;
+        try { size = new FileInfo(item.Path!).Length; using var probe = File.OpenRead(item.Path!); }
         catch (Exception e) { Fail(item.Id, $"cannot read: {e.Message}"); return; }
-        var size = fs.Length;
+        if (o.Resumable && shaEnd && _peerCaps.Contains("resume"))   // offer to carry on; wait for the offset
+        {
+            _awaitingResume = (item.Id, item.Path!, size, l);
+            l.SendText((Frame.FileBegin(item.Id, item.FileName!, size, null) with { Resume = true }).Json);
+            return;
+        }
         l.SendText(Frame.FileBegin(item.Id, item.FileName!, size, shaEnd ? null : o.Sha).Json);
-        _fileSend = new FileSend { Id = item.Id, ItemId = item.Id, Fs = fs, Size = size, Link = l, Total = size,
-                                   Hasher = shaEnd ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null };
+        StartFile(item.Id, item.Path!, size, l);
+    }
+
+    /// <summary>Stream a file from its start.</summary>
+    void StartFile(string id, string path, long size, Link l)
+    {
+        FileStream fs;
+        try { fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16); }
+        catch (Exception e) { Fail(id, $"cannot read: {e.Message}"); return; }
+        var hasher = _peerCaps.Contains("sha_end") ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null;
+        _fileSend = new FileSend { Id = id, ItemId = id, Fs = fs, Size = size, Link = l, Total = size, Hasher = hasher };
         FillWindow(_fileSend);
+    }
+
+    /// <summary>A file opened at offset, with the hash of everything before it (the part the receiver already has):
+    /// with sha_end the hash in file_end still covers the whole file. Runs off the session queue.</summary>
+    static (FileStream? Fs, IncrementalHash? Hasher, string? Error) OpenAt(string path, long offset, bool hashing)
+    {
+        FileStream? fs = null;
+        try
+        {
+            fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+            if (!hashing) { fs.Seek(offset, SeekOrigin.Begin); return (fs, null, null); }
+            var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buf = new byte[1 << 20];
+            var left = offset;
+            while (left > 0)
+            {
+                var n = fs.Read(buf, 0, (int)Math.Min(left, buf.Length));
+                if (n <= 0) { fs.Dispose(); hasher.Dispose(); return (null, null, "the file is shorter than it was"); }
+                hasher.AppendData(buf, 0, n);
+                left -= n;
+            }
+            return (fs, hasher, null);
+        }
+        catch (Exception e) { fs?.Dispose(); return (null, null, e.Message); }
+    }
+
+    /// <summary>The prefix is hashed: stream the rest, unless the item was cancelled, refused or cut off meanwhile.</summary>
+    void PrefixHashed(string id, long size, long offset, (FileStream? Fs, IncrementalHash? Hasher, string? Error) r)
+    {
+        void Close() { r.Fs?.Dispose(); r.Hasher?.Dispose(); }
+        if (_hashingPrefix is not { } hp || hp.Id != id) { Close(); return; }
+        _hashingPrefix = null;
+        var l = hp.Link;
+        if (!ReferenceEquals(l, _link) || !_linkUp || !_out.Exists(x => x.Item.Id == id)) { Close(); return; }
+        if (r.Fs == null) { Fail(id, $"cannot read: {r.Error}"); return; }
+        _fileSend = new FileSend { Id = id, ItemId = id, Fs = r.Fs, Size = size, Link = l, Total = size, Hasher = r.Hasher, SentBytes = offset };
+        FillWindow(_fileSend);
+    }
+
+    /// <summary>The hash of a kept partial's first Received bytes, read back from disk; null if it is gone or short.
+    /// Runs off the session queue.</summary>
+    static IncrementalHash? Rehash(Partial p)
+    {
+        try
+        {
+            if (!File.Exists(p.Part) || new FileInfo(p.Part).Length < p.Received) return null;
+            var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using var r = File.OpenRead(p.Part);
+            var buf = new byte[1 << 20];
+            var left = p.Received;
+            while (left > 0) { var n = r.Read(buf, 0, (int)Math.Min(left, buf.Length)); if (n <= 0) { h.Dispose(); return null; } h.AppendData(buf, 0, n); left -= n; }
+            return h;
+        }
+        catch (Exception) { return null; }
+    }
+
+    void TrimPartials()
+    {
+        foreach (var (id, p) in _partials.OrderBy(kv => kv.Value.At).Take(Math.Max(0, _partials.Count - 5)).ToList())
+        {
+            try { File.Delete(p.Part); } catch (Exception) { }
+            _partials.Remove(id);
+        }
     }
 
     /// <summary>Send a folder's entries from start on: folders as mkdir, then the next file; its end continues here.</summary>
     void FolderStep(string itemId, List<FolderEntry> entries, int start, long baseBytes, long total, Link l)
     {
         if (!ReferenceEquals(l, _link) || !_linkUp) return;                                   // resent after reconnect
-        if (!_out.Exists(x => x.Item.Id == itemId)) { _busy = false; Pump(); return; }        // refused
+        if (!_out.Exists(x => x.Item.Id == itemId)) { Release(itemId); return; }        // refused or cancelled
         var idx = start;
         while (idx < entries.Count && entries[idx].FullPath == null) { l.SendText(Frame.Mkdir(itemId, entries[idx].RelPath).Json); idx++; }
         if (idx == entries.Count) { l.SendText(Frame.FolderEnd(itemId).Json, ok => Wrote(itemId, l, ok)); return; }
@@ -857,7 +1296,7 @@ public sealed class Session : IDisposable
     void FillWindow(FileSend f)
     {
         if (!ReferenceEquals(f, _fileSend) || !ReferenceEquals(f.Link, _link) || !_linkUp) return;   // resent later
-        if (!_out.Exists(x => x.Item.Id == f.ItemId)) { _fileSend = null; f.Fs.Dispose(); _busy = false; Pump(); return; }   // refused
+        if (!_out.Exists(x => x.Item.Id == f.ItemId)) { _fileSend = null; f.Fs.Dispose(); Release(f.ItemId); return; }   // refused
         while (f.InFlight < Window && !f.Eof)
         {
             byte[] chunk;
@@ -883,10 +1322,12 @@ public sealed class Session : IDisposable
                 if (!ok || !ReferenceEquals(f, _fileSend)) return;
                 f.SentBytes += chunk.Length;
                 var done = f.Base + f.SentBytes;
-                var step = f.Total > 0 ? (int)(done * 20 / f.Total) : 20;   // progress in 5 % steps
-                if (step != f.LastStep && _out.Find(x => x.Item.Id == f.ItemId) is { } o)
+                // progress events: each whole percent at most, and no more often than ProgressInterval
+                var step = f.Total > 0 ? (int)(done * 100 / f.Total) : 100;
+                var t = _now();
+                if (step != f.LastStep && (t - f.LastEmit >= Config.ProgressInterval || step == 100) && _out.Find(x => x.Item.Id == f.ItemId) is { } o)
                 {
-                    f.LastStep = step;
+                    f.LastStep = step; f.LastEmit = t;
                     o.Item = o.Item with { State = new ItemState(ItemStateKind.Sending, (double)done / Math.Max(f.Total, 1)) };
                     Emit(new SessionEvent.Outgoing(o.Item));
                 }
@@ -909,7 +1350,8 @@ public sealed class Session : IDisposable
 
     void Wrote(string id, Link l, bool ok)
     {
-        if (!ReferenceEquals(l, _link)) return;
+        if (!ReferenceEquals(l, _link) || _wireItem != id) return;   // not the item on the wire any more (cancelled or refused meanwhile)
+        _wireItem = null;
         _busy = false;
         if (ok && _out.Find(x => x.Item.Id == id) is { } o && o.Item.State.Kind != ItemStateKind.Delivered)
         {

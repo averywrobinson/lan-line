@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// The rounded message box with the round send button inside it.
+/// The floating message box (design refresh, beta.10): a glass capsule over the feed, with the round send button
+/// inside it. "To:" and staged items float above it in the same glass group.
 struct Composer: View {
     @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
@@ -10,15 +11,16 @@ struct Composer: View {
 
     var body: some View {
         let p = Palette.of(scheme)
-        VStack(alignment: .trailing, spacing: 3) {
-        if model.multi { TargetPicker(model: model).padding(.horizontal, 16) }
-        if !model.staged.isEmpty { StagedStrip(model: model).padding(.horizontal, 12) }
+        GlassGroup(spacing: 8) {
+        VStack(alignment: .trailing, spacing: 6) {
+        if model.multi { TargetPicker(model: model).padding(.horizontal, 2) }
+        if !model.staged.isEmpty { StagedStrip(model: model) }
         HStack(alignment: .bottom, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 if model.draftEmpty {
                     Text(model.multi ? "Message \(model.sendTarget == nil ? "everyone" : model.targetLabel)" : "Message \(model.peerLabel)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(p.textSecondary.opacity(0.8))
+                        .font(.system(size: fs(13)))
+                        .foregroundStyle(p.textSecondary)   // full strength: measured 4.5:1+ on the glass over a white desktop
                         .padding(.leading, 5).padding(.top, 2)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -26,10 +28,10 @@ struct Composer: View {
                 MessageField(model: model, height: $height, handle: field)
                     .frame(height: height)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             Button { field.submit() } label: {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: fs(13), weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 26, height: 26)
                     .background(Circle().fill(model.draftEmpty && model.staged.isEmpty ? p.sendIdle : p.accent))
@@ -39,21 +41,16 @@ struct Composer: View {
             .disabled(model.draftEmpty && model.staged.isEmpty)
             .help("Send (Enter). Shift+Enter adds a line.")
             .accessibilityLabel("Send")
-            .padding(.bottom, 3)
+            .padding(.bottom, 4)
             .animation(.easeOut(duration: 0.15), value: model.draftEmpty)
         }
-        .padding(.leading, 10).padding(.trailing, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .fill(p.composerFill)
-                .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(
-                    LinearGradient(colors: [p.composerHighlight, p.composerStroke], startPoint: .top, endPoint: .bottom), lineWidth: 1))
-                .shadow(color: p.shadow.opacity(scheme == .dark ? 0.6 : 0.8), radius: 4, y: 1)
-        )
-        .padding(.horizontal, 12)
+        .padding(.leading, 13).padding(.trailing, 4)
+        .chrome(RoundedRectangle(cornerRadius: 17, style: .circular))   // a capsule at one line, a rounded box when it grows (circular: continuous corners glitch at radius = half the height)
         }
+        }
+        .padding(.horizontal, 10)
         .padding(.top, 6)
-        .padding(.bottom, 12)
+        .padding(.bottom, 10)
     }
 }
 
@@ -65,14 +62,14 @@ struct StagedStrip: View {
         let p = Palette.of(scheme)
         VStack(alignment: .leading, spacing: 4) {
             Text("Ready to send. Press Send, or remove what you don't want.")
-                .font(.system(size: 10.5)).foregroundStyle(p.textSecondary)
+                .font(.system(size: fs(10.5))).foregroundStyle(p.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(model.staged) { item in
                         HStack(spacing: 5) {
-                            Image(systemName: icon(item)).font(.system(size: 10))
-                            Text(item.label).font(.system(size: 11)).lineLimit(1)
-                            Button { model.unstage(item.id) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+                            Image(systemName: icon(item)).font(.system(size: fs(10)))
+                            Text(item.label).font(.system(size: fs(11))).lineLimit(1)
+                            Button { model.unstage(item.id) } label: { Image(systemName: "xmark").font(.system(size: fs(8), weight: .bold)) }
                                 .buttonStyle(.plain).help("Don't send this").accessibilityLabel("Remove \(item.label)")
                         }
                         .foregroundStyle(p.text)
@@ -82,6 +79,9 @@ struct StagedStrip: View {
                 }
             }
         }
+        .padding(.horizontal, 11).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .chrome(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(model.staged.count) item\(model.staged.count == 1 ? "" : "s") ready to send")
     }
@@ -111,9 +111,11 @@ struct TargetPicker: View {
                 }
             }
         } label: {
-            Text("To: \(model.targetLabel)").font(.system(size: 11, weight: .medium)).foregroundStyle(p.textSecondary)
+            Text("To: \(model.targetLabel)").font(.system(size: fs(11), weight: .medium)).foregroundStyle(p.text)
         }
         .menuStyle(.borderlessButton).fixedSize()
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .chrome(Capsule(), interactive: true)
         .help("Where Send goes: everyone, or one computer")
         .accessibilityLabel("Send to \(model.targetLabel)")
     }
@@ -136,7 +138,7 @@ struct MessageField: NSViewRepresentable {
         let tv = InputTextView()
         tv.isRichText = false
         tv.importsGraphics = false
-        tv.font = .systemFont(ofSize: 13)
+        tv.font = .systemFont(ofSize: fs(13))
         tv.textColor = .labelColor
         tv.drawsBackground = false
         tv.isAutomaticQuoteSubstitutionEnabled = false
@@ -155,6 +157,7 @@ struct MessageField: NSViewRepresentable {
             lm.ensureLayout(for: tc)
             binding.wrappedValue = min(max(20, lm.usedRect(for: tc).height + 4), 96)
             model.draftEmpty = tv.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            model.draftKeep = tv.string
         }
         tv.onChange = { [weak tv] in if let tv { resize(tv) } }
         tv.onSubmit = { [weak tv] in
@@ -167,6 +170,10 @@ struct MessageField: NSViewRepresentable {
         tv.onImage = { model.sendImage($0) }
         tv.isOwn = { model.isChipDraggedBack($0) }
         handle.textView = tv
+        if !model.draftKeep.isEmpty {   // the window was rebuilt (text size, contrast): put the draft back
+            tv.string = model.draftKeep
+            DispatchQueue.main.async { resize(tv) }
+        }
         let scroll = NSScrollView()
         scroll.documentView = tv
         scroll.drawsBackground = false

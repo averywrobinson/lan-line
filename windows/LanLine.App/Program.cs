@@ -15,6 +15,7 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        args = LaunchArgs.LinkOnly(args);   // a lanline: link launch is only that link, before any flag is read
         if (Headless.Wants(args))
         {
             if (!Console.IsOutputRedirected) AttachConsole(-1);   // WinExe: borrow the parent console when there is one
@@ -22,18 +23,26 @@ static class Program
         }
         var snapshot = Arg(args, "--snapshot");
         Theme.Forced = Arg(args, "--theme") switch { "dark" => true, "light" => false, _ => null };
+        Theme.ForcedHighContrast = Arg(args, "--theme") == "hc";   // a stand-in contrast theme, for checks
+        if (double.TryParse(Arg(args, "--text-scale"), System.Globalization.CultureInfo.InvariantCulture, out var forcedScale)) MainWindow.ForcedTextScale = Math.Clamp(forcedScale, 0.9, 2.25);
         Theme.Glass = snapshot == null && !args.Contains("--no-glass") && Theme.GlassSupported;
 
         // Explorer's "Send to → Lan-Line" / "Send with Lan-Line" start Lan-Line.exe --stage PATH… (beta.8).
         var stage = StageRequest.FromArgs(args);
+        // A toast's button or click opens lanline://notify?… (beta.10): Windows starts Lan-Line.exe --url LINK.
+        var link = Arg(args, "--url");
+        MainWindow.DebugLogPath = Arg(args, "--debug-log");
         var pipe = StageRequest.PipeName(System.Diagnostics.Process.GetCurrentProcess().SessionId);
+        if (Arg(args, "--test-notify") != null && Arg(args, "--test-pipe") is { } tp) pipe = tp;   // a test copy's own pipe
 
         // One window per user: two PC instances would keep replacing each other at the Mac.
-        using var single = new Mutex(true, snapshot == null ? @"Local\Lan-Line.SingleInstance" : @"Local\Lan-Line.Snapshot." + Environment.ProcessId, out var first);
+        var testRun = snapshot != null || Arg(args, "--test-notify") != null || Arg(args, "--render-badges") != null || Arg(args, "--render-edge") != null;   // checks never collide with the user's Lan-Line
+        using var single = new Mutex(true, !testRun ? @"Local\Lan-Line.SingleInstance" : @"Local\Lan-Line.Snapshot." + Environment.ProcessId, out var first);
         if (!first)
         {
             // Hand the paths (or just "show yourself") to the running window, which may still be starting.
             AllowSetForegroundWindow(-1);   // ASFW_ANY: let it come to the front
+            if (link != null) return StageRequest.TrySendLink(pipe, link, TimeSpan.FromSeconds(10)) ? 0 : 1;
             if (StageRequest.TrySend(pipe, stage ?? [], TimeSpan.FromSeconds(10))) return 0;
             MessageBox.Show("Lan-Line is already running.", "Lan-Line");
             return 0;
@@ -45,17 +54,29 @@ static class Program
         var demoSettings = Arg(args, "--demo-settings");
         var demo = args.Contains("--demo") || args.Contains("--demo-multi") || demoPair != null || demoSettings != null;
         var w = new MainWindow(args, demo);
+        w.ApplyTextScale();
+        if (Arg(args, "--render-badges") is { } rb) { w.RenderBadges(rb); return 0; }
+        if (Arg(args, "--render-edge") is { } re) { new EdgeDropZone(w).RenderTo(re); return 0; }
         if (demoSettings != null) { Demo.Fill(w, empty: false); w.DemoSettings(demoSettings == "first"); }
         else if (demoPair != null) w.DemoPair(demoPair);
         else if (args.Contains("--demo-multi")) Demo.Multi(w);
         else if (demo) Demo.Fill(w, empty: args.Contains("--empty"));
         if (stage is { Count: > 0 } && snapshot != null) w.Stage(stage, show: false);   // screenshots of the chips
+        if (Arg(args, "--demo-preview") is { } dp) w.DemoPreview(dp);
+        if (args.Contains("--demo-shortcuts")) w.ShowShortcuts(bringForward: false);
+        if (int.TryParse(Arg(args, "--demo-tour"), out var tourPage)) w.ShowTour(tourPage);   // screenshots of a tour card
+        if (args.Contains("--demo-smart")) w.DemoSmart();
+        if (Arg(args, "--demo-search") is { } ds) w.DemoSearch(ds);
+        if (args.Contains("--demo-transfers")) w.DemoTransfers(Path.Combine(Path.GetTempPath(), "lan-line-demo"));
         if (snapshot != null)
         {
             if (Arg(args, "--snapshot-size")?.Split('x') is [var sw, var sh] && double.TryParse(sw, out var ww) && double.TryParse(sh, out var hh)) { w.Width = ww; w.Height = hh; }
             return Snapshot(w, snapshot);
         }
         if (demo) w.DemoTray();
+        else WinToast.Register(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Lan-Line.exe"));
+        if (Arg(args, "--test-notify") is { } tn) { WinToast.Register(Environment.ProcessPath!); w.Loaded += (_, _) => w.TestNotify(tn); }
+        if (link != null) w.Loaded += (_, _) => w.HandleLink(link);   // Lan-Line wasn't running when the toast was clicked
         app.SessionEnding += (_, _) => w.PrepareToQuit();   // sign-out / shutdown: close for real, not to the tray
         if (Arg(args, "--test-close-after") is { } tc && double.TryParse(tc, out var tcs))   // checks of the tray path (beta.9)
             Delay(tcs, w.UserCloseForTest);
@@ -63,9 +84,18 @@ static class Program
             Delay(trs, w.ShowFromTrayForTest);
         Theme.Follow(app, w.ThemeChanged);
         using var stop = new CancellationTokenSource();
-        _ = StageRequest.Listen(pipe, paths => w.Dispatcher.BeginInvoke(() => w.Stage(paths)), stop.Token);
+        _ = StageRequest.Listen(pipe, paths => w.Dispatcher.BeginInvoke(() => w.Stage(paths)), stop.Token,
+                                onLink: l => w.Dispatcher.BeginInvoke(() => w.HandleLink(l)));
         if (stage is { Count: > 0 }) w.Loaded += (_, _) => w.Stage(stage);
-        var code = app.Run(w);
+        int code;
+        if (args.Contains(SignIn.BackgroundFlag) && w.CanStartHidden)
+        {
+            // Opened at sign-in: wait in the tray (the window comes up when something arrives or from the tray).
+            new System.Windows.Interop.WindowInteropHelper(w).EnsureHandle();
+            app.MainWindow = w;
+            code = app.Run();
+        }
+        else code = app.Run(w);
         stop.Cancel();
         return code;
     }
@@ -89,6 +119,13 @@ static class Program
         host.Resources.MergedDictionaries.Add(Application.Current.Resources);
         host.Measure(new Size(w.Width, w.Height));
         host.Arrange(new Rect(0, 0, w.Width, w.Height));
+        host.UpdateLayout();
+        // let background work land (Explorer thumbnails come from their own thread): pump for a moment
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        wait.Tick += (_, _) => { wait.Stop(); frame.Continue = false; };
+        wait.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
         host.UpdateLayout();
         System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         host.UpdateLayout();

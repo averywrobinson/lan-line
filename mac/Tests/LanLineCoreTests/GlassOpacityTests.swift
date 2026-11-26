@@ -44,4 +44,27 @@ final class GlassOpacityTests: XCTestCase {
         XCTAssertEqual(StorageSettings.load(from: url).glassOpacityValue, 0.5, accuracy: 1e-9)
         XCTAssertEqual(StorageSettings.load(from: url).retentionDays, 30)
     }
+
+    /// Accessibility pass (beta.10): the text size is always one of the choices.
+    func testTextScaleSnapsToAChoice() {
+        var s = StorageSettings()
+        XCTAssertEqual(s.textScaleValue, 1)
+        s.textScale = 1.3; XCTAssertEqual(s.textScaleValue, 1.3)
+        s.textScale = 1.22; XCTAssertEqual(s.textScaleValue, 1.15)
+        s.textScale = 9; XCTAssertEqual(s.textScaleValue, 1.5)
+        s.textScale = -3; XCTAssertEqual(s.textScaleValue, 0.9)
+        s.textScale = .nan; XCTAssertEqual(s.textScaleValue, 1)
+        XCTAssertEqual(StorageSettings.textScaleChoices, [0.9, 1.0, 1.15, 1.3, 1.5])
+    }
+
+    /// Design refresh (beta.10): text on the window body gets a scrim only when the window is more see-through
+    /// than the default, rising evenly to full strength at the minimum.
+    func testScrimStrength() {
+        XCTAssertEqual(StorageSettings.scrimStrength(1.0), 0)
+        XCTAssertEqual(StorageSettings.scrimStrength(StorageSettings.defaultGlassOpacity), 0)
+        XCTAssertEqual(StorageSettings.scrimStrength(0.57), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(StorageSettings.scrimStrength(0.40), 1, accuracy: 1e-9)
+        XCTAssertEqual(StorageSettings.scrimStrength(0.10), 1, accuracy: 1e-9, "clamped like the setting")
+        XCTAssertEqual(StorageSettings.scrimStrength(.nan), 0, "a bad value means the default")
+    }
 }

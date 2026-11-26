@@ -36,10 +36,11 @@ public struct HubItem: Sendable, Equatable, Identifiable {
     public var summary: ItemState {
         let s = to.compactMap { states[$0] }
         if s.count == to.count, s.allSatisfy({ $0 == .delivered }) { return .delivered }
-        let busy = s.filter { if case .failed = $0 { return false }; return $0 != .delivered }
+        let busy = s.filter { if case .failed = $0 { return false }; return $0 != .delivered && $0 != .cancelled }
         if busy.isEmpty, let f = s.first(where: { if case .failed = $0 { return true }; return false }) {
             if case .failed(let why) = f { return .failed(to.count > 1 ? "\(s.filter { if case .failed = $0 { return true }; return false }.count) of \(to.count): \(why)" : why) }
         }
+        if busy.isEmpty, s.contains(.cancelled) { return .cancelled }
         if s.count < to.count || busy.contains(.waiting) { return .waiting }
         let sending = busy.compactMap { if case .sending(let f) = $0 { return f }; return nil }
         if !sending.isEmpty { return .sending(sending.reduce(0, +) / Double(sending.count)) }
@@ -53,7 +54,12 @@ public enum HubEvent: Sendable, Equatable {
     case disconnected(partner: String, reason: String)
     case received(partner: String, Item)
     case outgoing(HubItem)
-    case receiveFailed(partner: String, name: String, reason: String)
+    /// An incoming file or folder still arriving, or stopped short (beta.10).
+    case incoming(partner: String, Item)
+    /// A partner's clipboard (clipboard sharing, beta.10).
+    case clipboard(partner: String, ClipContent)
+    /// `id`: the item that failed (the same id its progress card had, if it had one).
+    case receiveFailed(partner: String, name: String, reason: String, id: String)
     case status(partner: String, String)
     /// Pairing: the code was swapped for this long-term secret; save it for that partner.
     case rekeyed(partner: String, token: String)
@@ -131,8 +137,22 @@ public final class Hub: @unchecked Sendable {
             up.remove(p.id)
             return o
         }
-        old?.stop()
-        queue.async { if !self.stopped { self.makeSession(p.id, pairing: pairing); self.ensureListener() } }
+        let kept = old?.stopKeepingPartials() ?? [:]   // half-received files stay resumable across the swap
+        queue.async {
+            if !self.stopped { self.makeSession(p.id, pairing: pairing, partials: kept); self.ensureListener() }
+            else { for k in kept.values { try? FileManager.default.removeItem(at: k.part) } }
+        }
+    }
+
+    /// The partner's name changed (it said so in its hello, or it was renamed here): with a folder per computer,
+    /// what arrives from now on goes to the folder of that name. A file already arriving finishes where it started.
+    public func setName(partner id: String, _ name: String) { queue.async { self.setNameOnQueue(id, name) } }
+
+    private func setNameOnQueue(_ id: String, _ name: String) {
+        guard var p = partners[id], p.name != name, !name.isEmpty else { return }
+        p.name = name
+        partners[id] = p
+        if perComputer { sessions[id]?.setDownloadDir(folder(for: id)) }
     }
 
     /// Forget a partner: its Session stops and its secret is no longer accepted.
@@ -202,11 +222,74 @@ public final class Hub: @unchecked Sendable {
         return item
     }
 
+    /// Share the clipboard with every connected partner that takes it (beta.10); never queued.
+    /// `done` gets how many it went to and how many connected partners are too old for it.
+    public func sendClip(_ c: ClipContent, done: (@Sendable (_ sent: Int, _ tooOld: Int) -> Void)? = nil) {
+        queue.async {
+            let ss = self.order.compactMap { self.sessions[$0] }
+            let group = DispatchGroup()
+            let tally = ClipTally()
+            for s in ss {
+                group.enter()
+                s.peerTakesClips { takes in
+                    if takes == false { tally.old() }
+                    if takes == true { s.sendClip(c) { ok in if ok { tally.sent() }; group.leave() } } else { group.leave() }
+                }
+            }
+            group.notify(queue: self.queue) { done?(tally.n, tally.tooOld) }
+        }
+    }
+
+    private final class ClipTally: @unchecked Sendable {
+        private let lock = NSLock(); private(set) var n = 0, tooOld = 0
+        func sent() { lock.lock(); n += 1; lock.unlock() }
+        func old() { lock.lock(); tooOld += 1; lock.unlock() }
+    }
+
+    /// Where received files go (beta.10): one folder, or a folder per computer inside it. Applies to every partner now
+    /// and to partners added later.
+    public func setDownloads(base: URL, perComputer: Bool) {
+        queue.async {
+            self.downloadBase = base; self.perComputer = perComputer
+            for (id, s) in self.sessions { s.setDownloadDir(self.folder(for: id)) }
+        }
+    }
+
+    private var downloadBase: URL?
+    private var perComputer = false
+    private func folder(for id: String) -> URL {
+        ReceiveOptions.folder(base: downloadBase ?? config.downloadDir, perComputer: perComputer, partner: partners[id]?.name ?? id)
+    }
+
+    /// Drop every link and dial again (beta.10, the iPhone coming back to the front: iOS may have suspended its
+    /// sockets while it was in the background, and waiting 45 s for the dead-link check would feel broken).
+    public func reconnect() {
+        queue.async { for s in self.sessions.values { s.redialNow() } }
+    }
+
+    /// Step off every line until `reconnect()` (beta.10): the iPhone app does this in the background while its
+    /// share sheet connects with the same pairing, so the two never knock each other off.
+    public func hold() {
+        queue.async { for s in self.sessions.values { s.hold() } }
+    }
+
+    /// Stop an outgoing item for everyone it is still going to (beta.10).
+    public func cancel(_ hubID: String) {
+        queue.async {
+            for (sid, r) in self.routes where r.hub == hubID { self.sessions[r.partner]?.cancel(sid) }
+        }
+    }
+
+    /// Refuse an incoming item that is still arriving from `partner` (beta.10).
+    public func cancelIncoming(partner: String, id: String) {
+        queue.async { self.sessions[partner]?.cancelIncoming(id) }
+    }
+
     // MARK: sessions
 
-    private func makeSession(_ id: String, pairing: Bool) {
+    private func makeSession(_ id: String, pairing: Bool, partials: [String: Session.Partial] = [:]) {
         guard let p = partners[id] else { return }
-        var sc = SessionConfig(token: p.secret, name: config.name, downloadDir: config.downloadDir)
+        var sc = SessionConfig(token: p.secret, name: config.name, downloadDir: folder(for: id))
         sc.appVersion = config.appVersion; sc.latestKnown = config.latestKnown; sc.deviceID = config.deviceID
         sc.rekeyOnPair = pairing && !p.connects
         sc.external = !p.connects
@@ -217,6 +300,7 @@ public final class Hub: @unchecked Sendable {
         tags[id] = tag
         let s = Session(role: role, config: sc, queue: queue) { [weak self] e in self?.fromSession(tag.id, e) }
         sessions[id] = s
+        if !partials.isEmpty { s.adopt(partials: partials) }
         s.start()
     }
 
@@ -227,15 +311,20 @@ public final class Hub: @unchecked Sendable {
     private func fromSession(_ id: String, _ e: SessionEvent) {
         switch e {
         case .listening: break
-        case .connected(let name): up.insert(id); handler(.connected(partner: id, name: name))
+        case .connected(let name):
+            up.insert(id)
+            setNameOnQueue(id, name)   // the folder per computer follows the name the computer gives itself
+            handler(.connected(partner: id, name: name))
         case .disconnected(let r): up.remove(id); handler(.disconnected(partner: id, reason: r))
         case .received(let item): handler(.received(partner: id, item))
+        case .incoming(let item): handler(.incoming(partner: id, item))
+        case .clipboard(let c): handler(.clipboard(partner: id, c))
         case .outgoing(let item):
             guard let r = routes[item.id], var h = items[r.hub] else { return }
             h.states[r.partner] = item.state
             items[r.hub] = h
             handler(.outgoing(h))
-        case .receiveFailed(let n, let r): handler(.receiveFailed(partner: id, name: n, reason: r))
+        case .receiveFailed(let n, let r, let item): handler(.receiveFailed(partner: id, name: n, reason: r, id: item))
         case .error(let m): handler(.error(m))
         case .status(let s): handler(.status(partner: id, s))
         case .rekeyed(let t): if var p = partners[id] { p.secret = t; partners[id] = p }; handler(.rekeyed(partner: id, token: t))
@@ -278,8 +367,11 @@ public final class Hub: @unchecked Sendable {
                     let old = self.sessions.removeValue(forKey: p.id)
                     self.handler(.peerAddresses(partner: p.id, q.hosts))
                     DispatchQueue.global().async {
-                        old?.stop()
-                        self.queue.async { if !self.stopped, self.partners[p.id] != nil, self.sessions[p.id] == nil { self.makeSession(p.id, pairing: false) } }
+                        let kept = old?.stopKeepingPartials() ?? [:]   // a file cut off by the address change stays resumable
+                        self.queue.async {
+                            if !self.stopped, self.partners[p.id] != nil, self.sessions[p.id] == nil { self.makeSession(p.id, pairing: false, partials: kept) }
+                            else { for k in kept.values { try? FileManager.default.removeItem(at: k.part) } }
+                        }
                     }
                 }
             }
@@ -303,7 +395,7 @@ public final class Hub: @unchecked Sendable {
     }
 
     private func accept(fd: Int32, peer: String) {
-        guard !stopped else { close(fd); return }
+        guard !stopped, pending.count < Session.maxPending else { close(fd); return }   // strangers can't pile up connections
         let l = Link.accepted(fd: fd, peer: peer, queue: queue, openedAt: Date())
         pending[ObjectIdentifier(l)] = (l, Date())
         l.start { [weak self, weak l] ev in

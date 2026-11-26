@@ -79,6 +79,8 @@ final class HubRun: @unchecked Sendable {
                 }
             }
         case .disconnected(let p, let r): up.remove(p); log("disconnected", ["partner": names[p] ?? p, "reason": r])
+        case .clipboard(let p, let c): log("clipboard", ["from": names[p] ?? p, "fingerprint": ClipRules.fingerprint(c)])
+        case .incoming(let p, let item): log("incoming", ["from": names[p] ?? p, "id": item.id, "state": "\(item.state)"])
         case .received(let p, let item):
             let who = names[p] ?? p
             switch item.kind {
@@ -99,7 +101,7 @@ final class HubRun: @unchecked Sendable {
             }
         case .outgoing(let h):
             if case .failed(let why) = h.summary { log("send_failed", ["why": why]); if selftest { finish(false, why) } }
-        case .receiveFailed(let p, let n, let r): log("receive_failed", ["from": names[p] ?? p, "name": n, "reason": r]); if selftest { finish(false, r) }
+        case .receiveFailed(let p, let n, let r, _): log("receive_failed", ["from": names[p] ?? p, "name": n, "reason": r]); if selftest { finish(false, r) }
         case .status(let p, let s): log("status", ["partner": names[p] ?? p, "text": s])
         case .error(let m): log("error", ["message": m])
         case .updateAvailable(let v, _): log("update_available", ["version": v])

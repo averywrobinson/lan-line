@@ -86,14 +86,15 @@ final class PairingBookTests: XCTestCase {
         let ra = HubRecorder(), rd = HubRecorder()
         let main = DispatchQueue(label: "fake-main")
         let state = BookBox(PairingBook(config: DeviceConfig(deviceID: "device-aaaa", peers: [])))
-        var hubA: Hub!
-        hubA = Hub(config: hubConfig("A", device: "device-aaaa"), partners: []) { e in
+        let hubARef = HubRef()
+        hubARef.hub = Hub(config: hubConfig("A", device: "device-aaaa"), partners: []) { e in
             main.async {
                 let (ev, fx) = state.handle(e)
                 ra.add(ev)
-                for f in fx { if case .hubRename(let o, let n) = f { hubA.rename(partner: o, to: n) }; if case .hubRemove(let id) = f { DispatchQueue.global().async { hubA.remove(id) } } }
+                for f in fx { if case .hubRename(let o, let n) = f { hubARef.hub.rename(partner: o, to: n) }; if case .hubRemove(let id) = f { DispatchQueue.global().async { hubARef.hub.remove(id) } } }
             }
         }
+        let hubA = hubARef.hub!
         hubA.start(); defer { hubA.stop() }
         let code = "PAIRM31234"
         let pending = Partner(id: "pairing-x", name: "New computer", secret: code, role: "listen", hosts: [])
@@ -113,6 +114,61 @@ final class PairingBookTests: XCTestCase {
         await waitUntil(5, "delivered") { rd.last(t.id)?.summary == .delivered }
     }
 }
+
+/// The iPhone companion's path (beta.10): no partners yet, a QR pairing link, `book.begin` + `hub.add` (as
+/// PhoneModel.pair does), the pairing saved with the long-term secret, then a send after `reconnect()` (the phone
+/// coming back to the front).
+final class PhonePairingTests: XCTestCase {
+    func testQRLinkPairsAndSurvivesReconnect() async throws {
+        let main = DispatchQueue(label: "fake-main")
+        let desk = BookBox(PairingBook(config: DeviceConfig(deviceID: "device-desk1", peers: [])))
+        let rDesk = HubRecorder()
+        let hubDeskRef = HubRef()
+        hubDeskRef.hub = Hub(config: hubConfig("Desk", device: "device-desk1"), partners: []) { e in
+            main.async {
+                let (ev, fx) = desk.handle(e); rDesk.add(ev)
+                for f in fx { if case .hubRename(let o, let n) = f { hubDeskRef.hub.rename(partner: o, to: n) } }
+            }
+        }
+        let hubDesk = hubDeskRef.hub!
+        hubDesk.start(); defer { hubDesk.stop() }
+        let code = PairCode.generate()
+        let pending = Partner(id: "pairing-desk", name: "New computer", secret: code, role: "listen", hosts: [])
+        main.sync { desk.begin(pending) }
+        hubDesk.add(pending, pairing: true)
+        await waitUntil(5, "desk listening") { hubDesk.boundPort != nil }
+        // what the desk's QR code says, as the phone reads it
+        let link = try XCTUnwrap(PairLink.parse(PairLink(code: code, name: "Desk", port: hubDesk.boundPort!, hosts: ["127.0.0.1"]).url))
+
+        let phone = BookBox(PairingBook(config: DeviceConfig(deviceID: "device-phone1", peers: [])))
+        let rPhone = HubRecorder()
+        let hubPhoneRef = HubRef()
+        hubPhoneRef.hub = Hub(config: hubConfig("iPhone", device: "device-phone1"), partners: []) { e in
+            main.async {
+                let (ev, fx) = phone.handle(e); rPhone.add(ev)
+                for f in fx { if case .hubRename(let o, let n) = f { hubPhoneRef.hub.rename(partner: o, to: n) } }
+            }
+        }
+        let hubPhone = hubPhoneRef.hub!
+        hubPhone.start(); defer { hubPhone.stop() }
+        let p = Partner(id: "pairing-q", name: link.name, secret: link.code, role: "connect", hosts: link.hosts, port: link.port)
+        main.sync { phone.begin(p) }
+        hubPhone.add(p, pairing: false)
+        await waitUntil(10, "both sides saved the pairing") {
+            main.sync { phone.book.pending == nil && phone.book.config.partner("device-desk1") != nil && desk.book.config.partner("device-phone1") != nil }
+        }
+        XCTAssertEqual(main.sync { phone.book.config.partner("device-desk1")?.secret.count }, 64, "the long-term secret, not the code")
+        let t1 = hubPhone.send(text: "from the phone", to: nil)
+        await waitUntil(5, "first text") { rPhone.last(t1.id)?.summary == .delivered }
+        hubPhone.reconnect()   // back in front after the background
+        let t2 = hubPhone.send(text: "after reconnect", to: nil)
+        await waitUntil(10, "second text after the reconnect") { rPhone.last(t2.id)?.summary == .delivered }
+        XCTAssertEqual(rDesk.received(from: "device-phone1").count, 2)
+    }
+}
+
+/// A hub the event closure can reach before `Hub(...)` returns.
+final class HubRef: @unchecked Sendable { var hub: Hub! }
 
 /// The book plus the window's queue confinement, for the async test.
 final class BookBox: @unchecked Sendable {

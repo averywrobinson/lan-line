@@ -36,6 +36,12 @@ public sealed record Frame
     [JsonPropertyName("latest_known")] public LatestKnownInfo? LatestKnown { get; init; }
     /// <summary>hello / hello_ok (beta.7+): this computer's device id.</summary>
     [JsonPropertyName("device")] public string? Device { get; init; }
+    /// <summary>clip (beta.10, "clip" cap): a picture from the other computer's clipboard, PNG, base64.</summary>
+    [JsonPropertyName("png")] public string? Png { get; init; }
+    /// <summary>beta.10 ("resume" cap): file_begin with resume = true offers to continue an interrupted file; the
+    /// receiver answers "resume" with the offset it already has (0 = from the start).</summary>
+    [JsonPropertyName("resume")] public bool? Resume { get; init; }
+    [JsonPropertyName("offset")] public long? Offset { get; init; }
 
     public sealed record LatestKnownInfo([property: JsonPropertyName("version")] string Version, [property: JsonPropertyName("url")] string Url);
 
@@ -60,9 +66,20 @@ public sealed record Frame
     public static Frame FolderBegin(string id, string name, int count, long size) => new() { Type = "folder_begin", Id = id, Name = name, Count = count, Size = size };
     public static Frame Mkdir(string folder, string path) => new() { Type = "mkdir", Folder = folder, RelPath = path };
     public static Frame FolderEnd(string id) => new() { Type = "folder_end", Id = id };
+    /// <summary>The answer to a resumable file_begin: carry on from this byte.</summary>
+    public static Frame ResumeAt(string id, long offset) => new() { Type = "resume", Id = id, Offset = offset };
+    /// <summary>beta.10 ("cancel" cap): the sender stopped this file or folder; the receiver deletes what arrived.</summary>
+    public static Frame Cancel(string id) => new() { Type = "cancel", Id = id };
     public static Frame VersionInfo(string own, LatestKnownInfo? latest) => new() { Type = "version", Version = own, LatestKnown = latest };
     public static Frame Ack(string id, bool ok, string? err = null) => new() { Type = "ack", Id = id, Ok = ok, Err = err };
     public static readonly Frame Beat = new() { Type = "beat" };
+    /// <summary>beta.10 ("clip" cap): the sender's clipboard changed. Text or a PNG; may come between file chunks like ack.</summary>
+    public static Frame Clip(ClipContent c) => new()
+    {
+        Type = "clip", Id = Guid.NewGuid().ToString(),
+        Text = c is ClipContent.TextClip t ? t.Text : null,
+        Png = c is ClipContent.PngClip p ? Convert.ToBase64String(p.Data) : null,
+    };
 
     [JsonIgnore] public string Json => JsonSerializer.Serialize(this, Opts);
 

@@ -18,7 +18,12 @@ readonly record struct LinkEvent(LinkEventKind Kind, string? Text = null, byte[]
 /// </summary>
 sealed class Link
 {
-    const int MaxMessage = 2 << 20;
+    /// <summary>Room for a clipboard picture (beta.10); older versions take 2 MiB and are never sent one (pictures only
+    /// go to a partner with the "clip" cap).</summary>
+    const int MaxMessage = 16 << 20;
+    /// <summary>The first message on a connection is the hello (or its answer): small. Until one whole message
+    /// has arrived, nothing bigger is buffered, so a stranger can't make the listener hold megabytes.</summary>
+    internal const int FirstMessage = 64 << 10;
     readonly SerialQueue _q;
     Action<Link, LinkEvent> _onEvent;
     readonly CancellationTokenSource _cts = new();
@@ -88,6 +93,7 @@ sealed class Link
     {
         var buf = new byte[64 * 1024];
         var ms = new MemoryStream();
+        var first = true;
         try
         {
             while (true)
@@ -95,8 +101,9 @@ sealed class Link
                 var r = await ws.ReceiveAsync(buf, _cts.Token).ConfigureAwait(false);
                 if (r.MessageType == WebSocketMessageType.Close) { _q.Post(() => Finish("closed by peer")); return; }
                 ms.Write(buf, 0, r.Count);
-                if (ms.Length > MaxMessage) { _q.Post(() => Finish("message too big")); return; }
+                if (ms.Length > (first ? FirstMessage : MaxMessage)) { _q.Post(() => Finish("message too big")); return; }
                 if (!r.EndOfMessage) continue;
+                first = false;
                 var data = ms.ToArray();
                 ms.SetLength(0);
                 var ev = r.MessageType == WebSocketMessageType.Text

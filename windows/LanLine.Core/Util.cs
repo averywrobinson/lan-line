@@ -75,6 +75,7 @@ public static class Secrets
 
 public static class Hashing
 {
+    public static string Sha256Hex(byte[] d) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(d));
     public static string Sha256File(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);

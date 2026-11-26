@@ -185,3 +185,32 @@ public sealed class DiscoveryResponder : IDisposable
 
     public void Dispose() { _cts.Cancel(); _udp.Dispose(); }
 }
+
+/// <summary>The pairing link a QR code carries (beta.10, for the iPhone companion): the code on screen, this computer's
+/// name, port and addresses. The same format as PairLink on the Mac (values escaped to RFC 3986 unreserved).</summary>
+public sealed record PairLink(string Code, string Name, int Port, string[] Hosts)
+{
+    public string Url => $"lanline://pair?v=1&c={Code}&n={Uri.EscapeDataString(Name.Length > 40 ? Name[..40] : Name)}&p={Port}&h={string.Join(",", Hosts.Take(4))}";
+
+    public bool Equals(PairLink? o) => o is not null && Code == o.Code && Name == o.Name && Port == o.Port && Hosts.SequenceEqual(o.Hosts);
+    public override int GetHashCode() => HashCode.Combine(Code, Name, Port);
+
+    public static PairLink? Parse(string? s)
+    {
+        if (s == null || s.Length > 400 || !Uri.TryCreate(s.Trim(), UriKind.Absolute, out var u)) return null;
+        if (!u.Scheme.Equals("lanline", StringComparison.OrdinalIgnoreCase) || !u.Host.Equals("pair", StringComparison.OrdinalIgnoreCase)) return null;
+        var q = new Dictionary<string, string>();
+        foreach (var kv in u.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var i = kv.IndexOf('=');
+            if (i > 0) q[kv[..i]] = Uri.UnescapeDataString(kv[(i + 1)..]);
+        }
+        if (q.GetValueOrDefault("v") != "1" || PairCode.Normalize(q.GetValueOrDefault("c") ?? "") is not { } code) return null;
+        if (!int.TryParse(q.GetValueOrDefault("p"), out var port) || port is <= 0 or > 65535) return null;
+        var hosts = (q.GetValueOrDefault("h") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Where(Session.IsIPv4).Take(8).ToArray();
+        if (hosts.Length == 0) return null;
+        var name = new string((q.GetValueOrDefault("n") ?? "").Where(c => !char.IsControl(c)).ToArray());
+        if (name.Length > 40) name = name[..40];
+        return new PairLink(code, name.Length == 0 ? "Computer" : name, port, hosts);
+    }
+}

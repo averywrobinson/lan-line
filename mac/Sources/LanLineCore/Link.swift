@@ -44,13 +44,17 @@ final class Link: @unchecked Sendable {
     /// Set once the v2 handshake is done: from then on every message is sealed and plaintext is refused.
     var channel: Channel?
 
-    static let maxMessage = 2 << 20   // well above the 256 KiB chunk size
+    /// Well above the 256 KiB chunk size, and room for a clipboard picture (beta.10; older versions take 2 MiB and
+    /// are never sent one: pictures only go to a partner with the "clip" cap).
+    static let maxMessage = 16 << 20
+    /// The hello and its answer are a few hundred bytes; see `WSParser.firstMessage`.
+    static let firstMessage = 64 << 10
     private static let readSize = 256 * 1024
 
     private init(side: Side, fd: Int32, peer: String, queue: DispatchQueue, openedAt: Date) {
         self.side = side; self.fd = fd; self.peerDescription = peer; self.queue = queue; self.openedAt = openedAt
-        if case .server = side { parser = WSParser(expectMasked: true, maxMessage: Link.maxMessage) }
-        else { parser = WSParser(expectMasked: false, maxMessage: Link.maxMessage) }
+        if case .server = side { parser = WSParser(expectMasked: true, maxMessage: Link.maxMessage, firstMessage: Link.firstMessage) }
+        else { parser = WSParser(expectMasked: false, maxMessage: Link.maxMessage, firstMessage: Link.firstMessage) }
     }
 
     /// A connection the listener accepted; the client's upgrade request comes next.
