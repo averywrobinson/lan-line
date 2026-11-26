@@ -29,6 +29,8 @@ public sealed class SessionConfig
     public long DiskReserve { get; init; } = 64L << 20;
     /// <summary>Tests: pretend the download disk has this many bytes free.</summary>
     public long? FreeSpaceOverride { get; set; }
+    /// <summary>Tests: take texts but never answer them, so the sender's item stays "sent, waiting for the ack".</summary>
+    public bool HoldTextAcksForTests { get; init; }
     /// <summary>Listener, while pairing: answer the first good hello with a fresh 32-byte secret (rekey) and switch
     /// to it, so the short on-screen code is never the long-term secret. The code stays accepted until restart.</summary>
     public bool RekeyOnPair { get; init; }
@@ -301,28 +303,28 @@ public sealed class Session : IDisposable
     /// a full disk gives, which every version understands) and the part files are deleted.</summary>
     public void CancelIncoming(string id) => _q.Post(() => CancelIncomingOnQueue(id));
 
-    public Item SendText(string text)
+    public Item SendText(string text, string? id = null)
     {
-        var item = new Item(Guid.NewGuid().ToString(), false, text, null, text.Length, null, ItemState.Waiting);
+        var item = new Item(id ?? Guid.NewGuid().ToString(), false, text, null, text.Length, null, ItemState.Waiting);
         _q.Post(() => Enqueue(new Out { Item = item, Sha = "" }));
         return item;
     }
 
-    public Item SendFile(string path)
+    public Item SendFile(string path, string? id = null)
     {
         long size = -1;
         try { size = new FileInfo(path).Length; } catch (Exception) { }
-        var item = new Item(Guid.NewGuid().ToString(), false, null, Path.GetFileName(path), size, path, ItemState.Waiting);
+        var item = new Item(id ?? Guid.NewGuid().ToString(), false, null, Path.GetFileName(path), size, path, ItemState.Waiting);
         _q.Post(() => Enqueue(new Out { Item = item }));   // hashed while it streams (or first, for a beta.5 peer)
         return item;
     }
 
     /// <summary>Send a whole folder as one item. Symlinks and junctions are left out (see ScanFolder).</summary>
-    public Item SendFolder(string path)
+    public Item SendFolder(string path, string? id = null, FolderScan? given = null)
     {
-        var scan = ScanFolder(path);
+        var scan = given ?? ScanFolder(path);   // the hub passes the walk it already did (beta.11)
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
-        var item = new Item(Guid.NewGuid().ToString(), false, null, name, scan.Size, path, ItemState.Waiting, scan.Count);
+        var item = new Item(id ?? Guid.NewGuid().ToString(), false, null, name, scan.Size, path, ItemState.Waiting, scan.Count);
         _q.Post(() => Enqueue(new Out { Item = item, Sha = "", Entries = scan.Entries }));
         return item;
     }
@@ -656,7 +658,7 @@ public sealed class Session : IDisposable
             case "text" when f.Id != null && f.Text != null:
                 if (_done.Add(f.Id))
                     Emit(new SessionEvent.Received(new Item(f.Id, true, f.Text, null, f.Text.Length, null, ItemState.ReceivedState)));
-                l.SendText(Frame.Ack(f.Id, true).Json);
+                if (!Config.HoldTextAcksForTests) l.SendText(Frame.Ack(f.Id, true).Json);
                 break;
             case "file_begin" when f.Id != null:
                 AbortIncoming();

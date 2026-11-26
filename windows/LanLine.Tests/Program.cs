@@ -32,7 +32,10 @@ var tests = new List<(string Name, Func<Task> Body)>
     ("sha mismatch rejected", T.ShaMismatch), ("oversize and short rejected", T.OversizeShort),
     ("dead link after 45 s", T.DeadLink), ("queued before first connect", T.QueuedBeforeConnect),
     ("queue drained after reconnect", T.QueueAfterReconnect), ("drop mid-file resends", T.DropMidFile),
-    ("new peer replaces old", T.NewPeerReplaces), ("send-only peer: queue waits for the app", T.SendOnlyPeer), ("pair codes", T.PairCodes),
+    ("new peer replaces old", T.NewPeerReplaces), ("outbox: waiting items survive a restart, in order", T.OutboxRestart),
+    ("outbox: everyone keeps only those still waiting", T.OutboxEveryone), ("outbox: a file gone since fails, not sent", T.OutboxGone),
+    ("outbox: forgetting a partner drops what it was owed", T.OutboxForget), ("outbox: a replaced session keeps the queue", T.OutboxReplaced),
+    ("outbox: sweep keeps what the outbox needs", T.OutboxSweep), ("outbox: fast answers are never lost", T.OutboxFastAnswers), ("outbox: an unanswered item isn't saved or sent again", T.OutboxUnanswered), ("outbox: re-pairing keeps what was owed", T.OutboxRePair), ("send-only peer: queue waits for the app", T.SendOnlyPeer), ("pair codes", T.PairCodes),
     ("discovery reply round trip", T.DiscoveryReply), ("discovery over loopback", T.DiscoveryLoopback),
     ("config save round trip", T.ConfigSave), ("not enough disk space", T.DiskSpace), ("pairing code swapped for long secret", T.Rekey), ("storage cleanup rules", T.StorageRules), ("listener addresses reach dialer", T.PeerAddrs),
     ("v2 shared test vectors", T.CryptoVectors), ("v2 handshake refusals", T.HandshakeRefusals),
@@ -1601,9 +1604,9 @@ static class T
         public HubItem? Last(string id) => All.OfType<HubEvent.Outgoing>().LastOrDefault(o => o.Item.Id == id)?.Item;
     }
 
-    static HubConfig HubCfg(string tag, string device, int port = 0) => new()
+    static HubConfig HubCfg(string tag, string device, int port = 0, string? outbox = null) => new()
     {
-        Name = tag, DeviceId = device, DownloadDir = H.TempDir(tag), Port = port, BindHost = "127.0.0.1",
+        Name = tag, DeviceId = device, DownloadDir = H.TempDir(tag), Port = port, BindHost = "127.0.0.1", OutboxPath = outbox,
         Tune = s => new SessionConfig { Token = s.Token, Name = s.Name, DownloadDir = s.DownloadDir, AppVersion = s.AppVersion, LatestKnown = s.LatestKnown,
                                         DeviceId = s.DeviceId, RekeyOnPair = s.RekeyOnPair, External = s.External, Advertise = s.Advertise,
                                         Backoff = [0.2, 0.4], DialTimeout = TimeSpan.FromSeconds(2) },
@@ -1650,6 +1653,218 @@ static class T
             await H.Until(() => ra.Last(d.Id)?.Delivered == 2, "folder 2/2", 15);
         }
         finally { a.Stop(); b.Stop(); c.Stop(); }
+    }
+
+    // ---------- outbox (beta.11): what is still waiting for a partner survives a restart of the sender
+
+    static async Task<(Hub, HubRec)> OutSender(string outbox, params Partner[] partners)
+    {
+        var r = new HubRec();
+        var h = new Hub(HubCfg("A", "device-aaaa", outbox: outbox), partners, r.Add);
+        h.Start();
+        await H.Until(() => r.Port != null, "A listening", 5);
+        return (h, r);
+    }
+
+    static (Hub, HubRec) OutPhone(string tag, string device, string secret, int? port)
+    {
+        var r = new HubRec();
+        var h = new Hub(HubCfg(tag, device), [P("device-aaaa", "A", secret, "connect", port)], r.Add);
+        h.Start();
+        return (h, r);
+    }
+
+    static Partner OB => P("device-bbbb", "B", AB, "listen");
+    static Partner OC => P("device-cccc", "C", AC, "listen");
+
+    public static async Task OutboxRestart()
+    {
+        var dir = H.TempDir("outbox-restart"); var outbox = Path.Combine(dir, "outbox.json");
+        var file = H.RandomFile(dir, "photo.jpg", 50_000);
+        var (a, _) = await OutSender(outbox, OB);
+        a.SendText("first", "device-bbbb"); a.SendFile(file, "device-bbbb"); a.SendText("third", "device-bbbb");
+        await H.Until(() => Outbox.Load(outbox).Count == 3, "three saved", 5);
+        a.Stop();
+        var saved = Outbox.Load(outbox);
+        H.Eq("text,file,text", string.Join(",", saved.Select(e => e.Kind)), "in the order they were sent");
+        HubRec ra; (a, ra) = await OutSender(outbox, OB);
+        var (p, rp) = OutPhone("B", "device-bbbb", AB, ra.Port);
+        try
+        {
+            await H.Until(() => rp.Got().Count == 3, "all three arrive", 10);
+            H.Eq("first,third", string.Join(",", rp.Got().Where(i => i.Text != null).Select(i => i.Text)), "texts in order");
+            H.Eq(Hashing.Sha256File(file), Hashing.Sha256File(rp.Got().Single(i => i.Text == null).Path!), "same bytes");
+            await H.Until(() => saved.All(e => ra.Last(e.Id)?.Summary.Kind == ItemStateKind.Delivered), "delivered", 5);
+            H.True(!File.Exists(outbox), "nothing owed: the file goes");
+        }
+        finally { p.Stop(); a.Stop(); }
+    }
+
+    public static async Task OutboxEveryone()
+    {
+        var dir = H.TempDir("outbox-everyone"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, ra) = await OutSender(outbox, OB, OC);
+        var (pc, rc) = OutPhone("C", "device-cccc", AC, ra.Port);
+        Hub? pb = null;
+        try
+        {
+            await H.Until(() => ra.Up("device-cccc"), "C connected", 5);
+            var h = a.SendText("to everyone", null);
+            await H.Until(() => rc.Got().Count == 1, "C has it", 5);
+            try { await H.Until(() => Outbox.Load(outbox).FirstOrDefault()?.To.SequenceEqual(["device-bbbb"]) == true, "saved for B only", 5); }
+            catch (Exception) { throw new Exception($"saved for B only; outbox: {(File.Exists(outbox) ? File.ReadAllText(outbox) : "none")}; A saw: {string.Join(" | ", ra.All.OfType<HubEvent.Outgoing>().Select(o => string.Join(",", o.Item.States.Select(x => x.Key + "=" + x.Value.Kind))))}"); }
+            a.Stop();
+            (a, ra) = await OutSender(outbox, OB, OC);
+            HubRec rb; (pb, rb) = OutPhone("B", "device-bbbb", AB, ra.Port);
+            await H.Until(() => rb.Got().Count == 1, "B gets it after the restart", 10);
+            H.Eq("to everyone", rb.Got()[0].Text, "the text");
+            H.True(ra.Last(h.Id)?.To.SequenceEqual(["device-bbbb"]) == true, "restored for B only");
+            await Task.Delay(500);
+            H.Eq(1, rc.Got().Count, "C isn't sent a second copy");
+        }
+        finally { pb?.Stop(); pc.Stop(); a.Stop(); }
+    }
+
+    public static async Task OutboxGone()
+    {
+        var dir = H.TempDir("outbox-gone"); var outbox = Path.Combine(dir, "outbox.json");
+        var file = H.RandomFile(dir, "gone.png", 1000);
+        var (a, _) = await OutSender(outbox, OB);
+        a.SendFile(file, "device-bbbb");
+        await H.Until(() => Outbox.Load(outbox).Count == 1, "saved", 5);
+        a.Stop();
+        var id = Outbox.Load(outbox)[0].Id;
+        File.Delete(file);
+        HubRec ra; (a, ra) = await OutSender(outbox, OB);
+        try
+        {
+            await H.Until(() => ra.Last(id) != null, "shown failed", 5);
+            var st = ra.Last(id)!.Summary;
+            H.True(st.Kind == ItemStateKind.Failed && st.Error == "it's no longer there", "failed: it's no longer there");
+            H.True(!File.Exists(outbox), "nothing left owed");
+        }
+        finally { a.Stop(); }
+    }
+
+    public static async Task OutboxForget()
+    {
+        var dir = H.TempDir("outbox-forget"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, _) = await OutSender(outbox, OB, OC);
+        try
+        {
+            a.SendText("for both", null);
+            await H.Until(() => Outbox.Load(outbox).FirstOrDefault()?.To.Length == 2, "saved", 5);
+            a.Remove("device-bbbb");
+            await H.Until(() => Outbox.Load(outbox).FirstOrDefault()?.To.SequenceEqual(["device-cccc"]) == true, "only C left", 5);
+            a.Remove("device-cccc");
+            await H.Until(() => !File.Exists(outbox), "nothing left", 5);
+        }
+        finally { a.Stop(); }
+    }
+
+    public static async Task OutboxReplaced()
+    {
+        var dir = H.TempDir("outbox-replace"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, ra) = await OutSender(outbox, OB);
+        a.SendText("queued before", "device-bbbb");
+        await H.Until(() => Outbox.Load(outbox).Count == 1, "saved", 5);
+        a.Add(OB, pairing: false);
+        var (p, rp) = OutPhone("B", "device-bbbb", AB, ra.Port);
+        try
+        {
+            await H.Until(() => rp.Got().Count == 1, "arrives through the new Session", 10);
+            H.Eq("queued before", rp.Got()[0].Text, "the text");
+        }
+        finally { p.Stop(); a.Stop(); }
+    }
+
+    public static async Task OutboxFastAnswers()
+    {
+        var dir = H.TempDir("outbox-fast"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, ra) = await OutSender(outbox, OB);
+        var (p, rp) = OutPhone("B", "device-bbbb", AB, ra.Port);
+        try
+        {
+            await H.Until(() => ra.Up("device-bbbb"), "B connected", 5);
+            var sent = Enumerable.Range(0, 200).Select(i => a.SendText($"n{i}", "device-bbbb").Id).ToList();
+            await H.Until(() => rp.Got().Count == 200, "all arrive", 10);
+            await H.Until(() => sent.All(id => ra.Last(id)?.Summary.Kind == ItemStateKind.Delivered), "every row says delivered", 5);
+            await H.Until(() => !File.Exists(outbox), "nothing owed", 5);
+        }
+        finally { p.Stop(); a.Stop(); }
+    }
+
+        /// <summary>Review (beta.11): an item fully sent but not yet answered counts as delivered. Replacing the partner's Session, or
+    /// quitting, resets it to "waiting" inside the Session; that must not put it in the outbox or send it again.</summary>
+    public static async Task OutboxUnanswered()
+    {
+        var dir = H.TempDir("outbox-unacked"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, ra) = await OutSender(outbox, OB);
+        var rb = new HubRec();
+        var bc = new HubConfig
+        {
+            Name = "B", DeviceId = "device-bbbb", DownloadDir = H.TempDir("B"), Port = 0, BindHost = "127.0.0.1",
+            Tune = c => new SessionConfig { Token = c.Token, Name = c.Name, DownloadDir = c.DownloadDir, DeviceId = c.DeviceId, External = c.External,
+                                            Advertise = c.Advertise, Backoff = [0.2, 0.4], DialTimeout = TimeSpan.FromSeconds(2), HoldTextAcksForTests = true },
+        };
+        var pb = new Hub(bc, [P("device-aaaa", "A", AB, "connect", ra.Port)], rb.Add);
+        pb.Start();
+        try
+        {
+            await H.Until(() => ra.Up("device-bbbb"), "B connected", 5);
+            var h = a.SendText("once", "device-bbbb");
+            await H.Until(() => rb.Got().Count == 1, "B has it", 5);
+            await H.Until(() => ra.Last(h.Id)?.Summary.Kind == ItemStateKind.Sent, "sent, not answered", 5);
+            await H.Until(() => !File.Exists(outbox), "not owed", 5);
+            a.Add(OB, pairing: false);   // the partner's Session is replaced (as when it moves address)
+            await H.Until(() => rb.Connects("device-aaaa") >= 2, "B back", 10);
+            await Task.Delay(500);
+            H.Eq(1, rb.Got().Count, "not sent a second time");
+            a.Stop();
+            await Task.Delay(300);
+            H.True(!File.Exists(outbox), "quitting didn't put it in the outbox");
+        }
+        finally { pb.Stop(); a.Stop(); }
+    }
+
+    /// <summary>Review (beta.11): re-pairing pairs under a new id, forgets the older pairing, then renames the new one to the same
+    /// device id. What the older pairing was owed must go on.</summary>
+    public static async Task OutboxRePair()
+    {
+        var dir = H.TempDir("outbox-repair"); var outbox = Path.Combine(dir, "outbox.json");
+        var (a, ra) = await OutSender(outbox, OB);
+        Hub? p = null;
+        try
+        {
+            a.SendText("before re-pairing", "device-bbbb");
+            await H.Until(() => Outbox.Load(outbox).Count == 1, "saved", 5);
+            var fresh = Secrets.NewToken();
+            a.Add(P("pairing-1", "B", fresh, "listen"), pairing: false);
+            a.Remove("device-bbbb");
+            a.Rename("pairing-1", "device-bbbb");
+            await H.Until(() => Outbox.Load(outbox).FirstOrDefault()?.To.SequenceEqual(["device-bbbb"]) == true, "still owed after the re-pair", 5);
+            HubRec rp; (p, rp) = OutPhone("B", "device-bbbb", fresh, ra.Port);
+            await H.Until(() => rp.Got().Count == 1, "arrives", 10);
+            H.Eq("before re-pairing", rp.Got()[0].Text, "the text");
+        }
+        finally { p?.Stop(); a.Stop(); }
+    }
+
+    public static Task OutboxSweep()
+    {
+        var dir = H.TempDir("outbox-sweep"); var pasted = Path.Combine(dir, "Pasted");
+        Directory.CreateDirectory(pasted);
+        var old = DateTime.UtcNow.AddDays(-3);
+        string Make(string name, DateTime at) { var u = Path.Combine(pasted, name); File.WriteAllBytes(u, [1]); File.SetLastWriteTimeUtc(u, at); return u; }
+        var oldUnneeded = Make("a.png", old); var oldNeeded = Make("b.png", old); var recent = Make("c.png", DateTime.UtcNow);
+        var sub = Path.Combine(pasted, "UUID-1"); Directory.CreateDirectory(sub);
+        File.WriteAllBytes(Path.Combine(sub, "photo.heic"), [2]); Directory.SetLastWriteTimeUtc(sub, old);
+        var outbox = Path.Combine(dir, "outbox.json");
+        Outbox.Save(outbox, [new OutboxEntry { Id = "1", Kind = "file", Path = oldNeeded, To = ["x"] },
+                             new OutboxEntry { Id = "2", Kind = "file", Path = Path.Combine(sub, "photo.heic"), To = ["x"] }]);
+        H.Eq(1, Outbox.SweepUnsent(pasted, outbox, TimeSpan.FromDays(1)), "one removed");
+        H.True(!File.Exists(oldUnneeded) && File.Exists(oldNeeded) && File.Exists(recent) && Directory.Exists(sub), "keeps what is owed or recent");
+        return Task.CompletedTask;
     }
 
     public static async Task HubWrongSecret()

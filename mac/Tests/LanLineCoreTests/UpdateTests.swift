@@ -126,6 +126,28 @@ final class UpdateTests: XCTestCase {
         XCTAssertTrue(a.url.hasSuffix("/v\(version)"))
     }
 
+    /// The iPhone app's version (ios/set-version.sh) must follow VERSION too (beta.11), or it tells computers the wrong one.
+    func testIPhoneVersionMatchesVERSION() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../..").standardizedFileURL
+        guard FileManager.default.fileExists(atPath: root.appendingPathComponent("ios").path) else {
+            throw XCTSkip("the iPhone app isn't in this checkout (the public export leaves it out)")
+        }
+        let version = try String(contentsOf: root.appendingPathComponent("VERSION"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let swift = try String(contentsOf: root.appendingPathComponent("ios/Shared/AppVersion.swift"), encoding: .utf8)
+        XCTAssertTrue(swift.contains("static let full = \"\(version)\""), "run ios/set-version.sh")
+        let pbx = try String(contentsOf: root.appendingPathComponent("ios/LanLine.xcodeproj/project.pbxproj"), encoding: .utf8)
+        let short = String(version.prefix { $0 != "-" })
+        XCTAssertEqual(pbx.components(separatedBy: "MARKETING_VERSION = \(short);").count - 1, 4, "run ios/set-version.sh")
+        XCTAssertFalse(pbx.contains("CURRENT_PROJECT_VERSION = 1;"), "the build number must count up for TestFlight")
+        // nothing on the iPhone writes its own version (the share sheet did, review beta.11)
+        let ios = root.appendingPathComponent("ios")
+        for case let u as URL in FileManager.default.enumerator(at: ios, includingPropertiesForKeys: nil)!
+            where u.pathExtension == "swift" && u.lastPathComponent != "AppVersion.swift" {
+            let text = try String(contentsOf: u, encoding: .utf8)
+            XCTAssertNil(text.range(of: #"-beta\.[0-9]+""#, options: .regularExpression), "\(u.lastPathComponent) writes its own version")
+        }
+    }
+
     /// beta.10 is the first two-digit beta: it must sort after beta.9 (numbers, not text), and be offered as an update.
     func testTwoDigitBetaSortsAfterBetaNine() {
         let b9 = LanLineVersion("0.9.0-beta.9")!, b10 = LanLineVersion("0.9.0-beta.10")!

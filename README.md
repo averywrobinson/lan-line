@@ -72,8 +72,8 @@ Real windows from this build (sample conversation):
 
 | | Download | Requires |
 |---|---|---|
-| **macOS** | `Lan-Line-0.9.0-beta.10-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
-| **Windows** | `Lan-Line-0.9.0-beta.10-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
+| **macOS** | `Lan-Line-0.9.0-beta.11-mac.dmg` from [Releases](https://github.com/averywrobinson/lan-line/releases) — open it and drag Lan-Line to Applications | macOS 13+ (Apple Silicon or Intel) |
+| **Windows** | `Lan-Line-0.9.0-beta.11-windows-setup.exe` from [Releases](https://github.com/averywrobinson/lan-line/releases) — one-click, per-user, no admin; .NET is included | Windows 10 (1809+) or 11, 64-bit |
 
 Homebrew (Apple Silicon; Intel Macs use the DMG):
 
@@ -84,9 +84,9 @@ brew install --cask averywrobinson/tap/lan-line
 
 Homebrew 7 asks you to trust third-party taps; without it, `brew upgrade` may skip Lan-Line. Installing by full name works either way.
 
-**First open (beta builds aren't code-signed yet):**
-- **Mac:** macOS says it can't verify Lan-Line. Click *Done*, then open *System Settings → Privacy & Security* and click *Open Anyway*.
-- **Windows:** SmartScreen shows "Windows protected your PC". Click *More info → Run anyway*.
+**First open:**
+- **Mac:** signed and notarized by Apple, so it opens straight away.
+- **Windows (not code-signed yet):** SmartScreen shows "Windows protected your PC". Click *More info → Run anyway*.
 - If your firewall asks, allow Lan-Line on private networks.
 
 ## Quick start
@@ -134,7 +134,7 @@ All traffic between the computers is encrypted. The pairing code only proves tha
 
 Limits: someone on your network can still see how much is sent and when, and encryption can't protect a computer that is already compromised. Full design and threat model: [ENCRYPTION.md](ENCRYPTION.md).
 
-**Updating from an older beta:** update both computers. Any two betas from beta.5 on can talk to each other; clipboard sharing and carrying on after a dropped connection need beta.10 on both ends, and folders need beta.6 or later. beta.4 and earlier can't connect to anything newer; the window says "Update Lan-Line on …". Your pairing carries over.
+**Updating from an older beta:** update both computers. Any two betas from beta.5 on can talk to each other; clipboard sharing and carrying on after a dropped connection need beta.10 or later on both ends, and folders need beta.6 or later. beta.4 and earlier can't connect to anything newer; the window says "Update Lan-Line on …". Your pairing carries over.
 
 ## How it works
 
@@ -169,6 +169,7 @@ Installer: `dotnet publish windows/LanLine.App -c Release -r win-x64 --self-cont
 Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
 - **Who:** Avery Robinson ([@averywrobinson](https://github.com/averywrobinson)) is the author, reviewer and approver of every release. AI coding assistants help write the code; every change is reviewed, and only Avery approves a signing request.
+- **Mac:** the Mac app is signed with Avery's Apple Developer ID and notarized by Apple (since 0.9.0-beta.11); that is separate from SignPath, which covers Windows.
 - **What gets signed:** only installers built by this repository's GitHub Actions workflow (`.github/workflows/windows-release.yml`) from a tagged commit of this public source. Windows signing starts once SignPath Foundation approves the project; until then the Windows installer is unsigned and SmartScreen warns about it.
 - **Privacy:** Lan-Line sends nothing to anyone but your own paired computers. It has no telemetry, accounts or analytics. It goes online only to check for an update (one small file, no ID), to download an update you chose to install, and, if you turn link previews on, to fetch the pages of links you receive. See the README's privacy notes.
 - **MFA:** two-factor authentication is on for every account with access to this repository and to SignPath.

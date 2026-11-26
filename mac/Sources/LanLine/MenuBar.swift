@@ -180,7 +180,7 @@ final class StatusDropView: NSView {
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         if !urls.isEmpty { onDrop(urls, nil); return true }
         if let png = pb.data(forType: .png) ?? pb.data(forType: .tiff).flatMap({ NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }) {
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Lan-Line-pasted", isDirectory: true)
+            let dir = MainActor.assumeIsolated { Pasted.dir }
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
             let u = dir.appendingPathComponent("dropped-\(f.string(from: Date())).png")

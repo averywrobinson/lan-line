@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build LanLineShare.appex (universal, ad-hoc signed, sandboxed) into "$1/Contents/PlugIns/". Called by build-app.sh.
+# Build LanLineShare.appex (universal, sandboxed; signed with $SIGN_ID, ad-hoc if unset) into "$1/Contents/PlugIns/". Called by build-app.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
 APP="$1"; VERSION="$2"; BUILD="$3"
@@ -35,4 +35,6 @@ cat > "$X/Contents/Info.plist" <<PLIST
   </dict>
 </dict></plist>
 PLIST
-codesign --force --sign - --entitlements Entitlements.plist --identifier com.avery.lan-line.share "$X"
+ID="${SIGN_ID:--}"; OPTS=()
+case "$ID" in "Developer ID Application:"*) OPTS=(--options runtime --timestamp) ;; esac
+codesign --force --sign "$ID" "${OPTS[@]+"${OPTS[@]}"}" --entitlements Entitlements.plist --identifier com.avery.lan-line.share "$X"

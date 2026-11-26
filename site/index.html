@@ -1237,7 +1237,7 @@
 
           <!-- Download Buttons wired directly to GitHub Releases + interactive modal -->
           <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-8">
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.10/Lan-Line-0.9.0-beta.10-mac.dmg"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.11/Lan-Line-0.9.0-beta.11-mac.dmg"
                onclick="openDownloadModal('macOS')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#080A0F] bg-[#F8FAFC] hover:bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-8px_rgba(248,250,252,0.2)] active:scale-[0.985] transition-all">
               <!-- Minimal Apple icon -->
@@ -1247,7 +1247,7 @@
               <span>Download for macOS</span>
             </a>
 
-            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.10/Lan-Line-0.9.0-beta.10-windows-setup.exe"
+            <a href="https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.11/Lan-Line-0.9.0-beta.11-windows-setup.exe"
                onclick="openDownloadModal('Windows')"
                class="w-full sm:w-auto min-w-[220px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-[14.5px] font-medium text-[#F8FAFC] bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.13] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] active:scale-[0.985] transition-all">
               <!-- Minimal Windows 4-pane grid icon -->
@@ -1259,7 +1259,7 @@
           </div>
 
           <p class="text-[12.5px] leading-relaxed text-[#64748B] max-w-md mx-auto -mt-3 mb-8">
-            Beta: an early build that hasn’t been tested thoroughly yet. It isn’t code-signed yet, so the first open asks for a one-time OK (see the FAQ). After that it keeps itself current: one click installs a new build, once its signature checks out.
+            Beta: an early build that hasn’t been tested thoroughly yet. The Mac version is signed and notarized by Apple; on Windows the first open asks for a one-time OK (see the FAQ). After that it keeps itself current: one click installs a new build, once its signature checks out.
           </p>
 
           <!-- Terminal Install Pill Switcher + GitHub Source / Releases Strip -->
@@ -1329,7 +1329,7 @@
           <p class="font-mono text-[11.5px] uppercase tracking-[0.14em] text-sky-300/80 mb-3">Public beta</p>
           <h2 class="text-3xl sm:text-4xl font-semibold tracking-tighterDisplay text-[#F8FAFC]">Help test Lan-Line.</h2>
           <p class="text-[14.5px] leading-relaxed text-[#94A3B8] mt-4">Install it on a Mac and a Windows PC on the same network, use it for a few days, and tell us what breaks or feels off.</p>
-          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating:</span> from beta.4, update every computer (beta.5 and later encrypt everything and can’t talk to beta.4; the window says “Update Lan-Line on …”). beta.5 and later work together; folders need beta.6 or later on both ends, pairing more than two computers needs beta.7 or later on the ones that pair with several, and clipboard sharing and resuming an interrupted transfer need beta.10 on both. Your pairings carry over.</p>
+          <p class="text-[13px] leading-relaxed text-[#94A3B8] mt-3 smoked-glass-subtle rounded-xl px-4 py-2.5"><span class="text-[#E2E8F0] font-medium">Updating:</span> from beta.4, update every computer (beta.5 and later encrypt everything and can’t talk to beta.4; the window says “Update Lan-Line on …”). beta.5 and later work together; folders need beta.6 or later on both ends, pairing more than two computers needs beta.7 or later on the ones that pair with several, and clipboard sharing and resuming an interrupted transfer need beta.10 or later on both. Your pairings carry over.</p>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="smoked-glass-subtle rounded-2xl p-6 flex flex-col gap-3">
@@ -1352,7 +1352,7 @@
               <h3 class="text-[15px] font-semibold tracking-[-0.02em]">Known issues</h3>
             </div>
             <ul class="flex flex-col gap-2 text-[13.5px] leading-relaxed text-[#94A3B8]">
-              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Not code-signed yet: the first open needs a one-time OK (see the FAQ).</span></li>
+              <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Windows: not code-signed yet, so the first open needs a one-time OK (see the FAQ). The Mac version is signed and notarized.</span></li>
               <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Encryption hides what you send, not that you’re sending: someone on your network can still see how much moves and when. It can’t protect a computer that’s already compromised.</span></li>
                             <li class="flex gap-2.5"><span class="mt-[7px] w-1.5 h-1.5 rounded-full bg-sky-300/70 shrink-0"></span><span>Mac: macOS 13+ (Apple Silicon or Intel). Windows: 10 (1809+) or 11, 64-bit.</span></li>
             </ul>
@@ -1621,7 +1621,7 @@
             <div class="faq-content">
               <div class="faq-inner px-6 pb-5">
                 <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
-                  One is in testing. It pairs by scanning a QR code your Mac or PC shows, then sends and receives photos, files and text over the same encrypted local link while it’s open. It isn’t in the App Store yet.
+                  One is in testing. It pairs by scanning a QR code your Mac or PC shows, then sends and receives photos, files and text over the same encrypted local link while it’s open; anything sent to it meanwhile waits on the computer until you open it. It isn’t in the App Store yet.
                 </p>
               </div>
             </div>
@@ -1670,7 +1670,7 @@
           <!-- FAQ (beta) -->
           <div class="faq-item smoked-glass-subtle rounded-2xl transition-colors" data-open="false">
             <button type="button" class="faq-trigger w-full px-6 py-5 flex items-center justify-between gap-4 text-left" aria-expanded="false">
-              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Why does my computer warn me the first time I open it?</span>
+              <span class="text-[15.5px] font-medium text-[#F8FAFC]">Why does Windows warn me the first time I open it?</span>
               <span class="faq-chevron w-6 h-6 rounded-full bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-[#94A3B8] shrink-0">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                   <line x1="12" y1="5" x2="12" y2="19" />
@@ -1681,7 +1681,7 @@
             <div class="faq-content">
               <div class="faq-inner px-6 pb-5">
                 <p class="text-[14.5px] leading-relaxed text-[#94A3B8]">
-                  The beta isn’t code-signed yet. On a Mac, click Done, then open System Settings → Privacy &amp; Security and click Open Anyway. On Windows, SmartScreen says “Windows protected your PC”: choose More info → Run anyway. You only do this once.
+                  The Windows beta isn’t code-signed yet, so SmartScreen says “Windows protected your PC”: choose More info → Run anyway. You only do this once. The Mac version is signed and notarized by Apple and opens without a warning.
                 </p>
               </div>
             </div>
@@ -1762,7 +1762,7 @@
         </div>
         <div>
           <h3 id="modalTitle" class="text-[16px] font-semibold text-[#F8FAFC]">Lan-Line for macOS</h3>
-          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.10 · macOS 13+ · Apple Silicon or Intel</p>
+          <p id="modalSubtitle" class="font-mono text-[11.5px] text-[#94A3B8]">v0.9.0-beta.11 · macOS 13+ · Apple Silicon or Intel</p>
         </div>
       </div>
 
@@ -1783,10 +1783,10 @@
           <button type="button" id="copyReleaseUrlBtn" onclick="copyModalReleaseUrl()" class="font-mono text-[10.5px] text-sky-300 hover:text-sky-200">Copy URL</button>
         </div>
         <p id="modalReleaseUrl" class="font-mono text-[11px] text-[#CBD5E1] break-all leading-relaxed">
-          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.10/Lan-Line-0.9.0-beta.10-mac.dmg
+          https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.11/Lan-Line-0.9.0-beta.11-mac.dmg
         </p>
         <p class="text-[11.5px] text-[#64748B] mt-1.5">
-          <span id="modalFirstOpen">Beta builds aren’t code-signed yet; the first open asks for a one-time OK.</span>
+          <span id="modalFirstOpen">On Windows the first open asks for a one-time OK; the Mac version is signed and notarized.</span>
         </p>
       </div>
 
@@ -2540,14 +2540,14 @@
       const INSTALLER_META = {
         macOS: {
           title: 'Lan-Line for macOS',
-          subtitle: 'v0.9.0-beta.10 · macOS 13+ · Apple Silicon or Intel · 3.9 MB DMG',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.10/Lan-Line-0.9.0-beta.10-mac.dmg',
-          firstOpen: 'Open the DMG and drag Lan-Line to Applications. First open: click Done, then System Settings → Privacy & Security → Open Anyway.',
+          subtitle: 'v0.9.0-beta.11 · macOS 13+ · Apple Silicon or Intel · 4.0 MB DMG',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.11/Lan-Line-0.9.0-beta.11-mac.dmg',
+          firstOpen: 'Open the DMG and drag Lan-Line to Applications. It’s signed and notarized by Apple, so it opens straight away.',
         },
         Windows: {
           title: 'Lan-Line for Windows',
-          subtitle: 'v0.9.0-beta.10 · Windows 10/11 (x64) · 49 MB setup',
-          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.10/Lan-Line-0.9.0-beta.10-windows-setup.exe',
+          subtitle: 'v0.9.0-beta.11 · Windows 10/11 (x64) · 49 MB setup',
+          url: 'https://github.com/averywrobinson/lan-line/releases/download/v0.9.0-beta.11/Lan-Line-0.9.0-beta.11-windows-setup.exe',
           firstOpen: 'Run the setup (no admin needed). If SmartScreen appears, choose More info → Run anyway.',
         },
       };

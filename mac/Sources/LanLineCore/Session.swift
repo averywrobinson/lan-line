@@ -24,6 +24,8 @@ public struct SessionConfig: Sendable {
     public var diskReserve: Int64 = 64 << 20
     /// Tests: pretend the download disk has this many bytes free.
     public var freeSpaceOverride: Int64?
+    /// Tests: take texts but never answer them, so the sender's item stays "sent, waiting for the ack".
+    public var holdTextAcksForTests = false
     /// Seconds between liveness ticks. 0 = no timer (tests call `tick()` themselves).
     public var tickInterval: TimeInterval = 1
     /// Listener, while pairing: answer the first good hello with a fresh 32-byte secret (`rekey`) and switch to
@@ -301,16 +303,16 @@ public final class Session: @unchecked Sendable {
     }
 
     @discardableResult
-    public func send(text: String) -> Item {
-        let item = Item(id: UUID().uuidString, kind: .text(text), incoming: false, state: .waiting)
+    public func send(text: String, id: String = UUID().uuidString) -> Item {
+        let item = Item(id: id, kind: .text(text), incoming: false, state: .waiting)
         queue.async { self.enqueue(Out(item: item, sha: "")) }
         return item
     }
 
     @discardableResult
-    public func send(file url: URL) -> Item {
+    public func send(file url: URL, id: String = UUID().uuidString) -> Item {
         let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.int64Value ?? -1
-        let item = Item(id: UUID().uuidString, kind: .file(name: url.lastPathComponent, size: size, url: url),
+        let item = Item(id: id, kind: .file(name: url.lastPathComponent, size: size, url: url),
                         incoming: false, state: .waiting)
         queue.async { self.enqueue(Out(item: item)) }   // hashed while it streams (or first, for a beta.5 peer)
         return item
@@ -318,9 +320,9 @@ public final class Session: @unchecked Sendable {
 
     /// Send a whole folder as one item. Symlinks are left out (see `scanFolder`).
     @discardableResult
-    public func send(folder url: URL) -> Item {
-        let scan = Session.scanFolder(url)
-        let item = Item(id: UUID().uuidString, kind: .folder(name: url.lastPathComponent, count: scan.count, size: scan.size, url: url),
+    public func send(folder url: URL, scan given: FolderScan? = nil, id: String = UUID().uuidString) -> Item {
+        let scan = given ?? Session.scanFolder(url)   // the hub passes the walk it already did (beta.11)
+        let item = Item(id: id, kind: .folder(name: url.lastPathComponent, count: scan.count, size: scan.size, url: url),
                         incoming: false, state: .waiting)
         queue.async { self.enqueue(Out(item: item, sha: "", entries: scan.entries)) }
         return item
@@ -707,7 +709,7 @@ public final class Session: @unchecked Sendable {
             if done.insert(id).inserted {
                 emit(.received(Item(id: id, kind: .text(text), incoming: true, state: .received)))
             }
-            l.send(text: Frame.ack(id: id, ok: true).json)
+            if !config.holdTextAcksForTests { l.send(text: Frame.ack(id: id, ok: true).json) }
         case "file_begin":
             guard let id = f.id else { return }
             abortIncoming()

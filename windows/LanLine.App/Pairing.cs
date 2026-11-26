@@ -36,6 +36,11 @@ sealed partial class MainWindow
 
     int Port => int.TryParse(Arg(_args, "--port"), out var p) ? p : _device.Port;
     string ConfigPath => Arg(_args, "--config") ?? LanLineConfig.DefaultPath;
+    /// <summary>Items still waiting for a partner (beta.11), kept so a restart doesn't drop them.</summary>
+    string OutboxFile => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(ConfigPath)!, "outbox.json");
+    /// <summary>Pasted pictures wait here to be sent, beside the outbox rather than in %TEMP% (which Storage Sense may empty);
+    /// what nothing waits for is tidied after 7 days (the feed shows them).</summary>
+    string PastedDir => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(ConfigPath)!, "Pasted");
     static string MyName => Environment.MachineName;
 
     void Boot()
@@ -61,7 +66,9 @@ sealed partial class MainWindow
         {
             Name = MyName, DeviceId = _device.DeviceId, DownloadDir = Arg(_args, "--downloads") ?? LanLineConfig.DownloadsDir, Port = Port,
             AppVersion = MyVersion, LatestKnown = SavedLatest(), Advertise = [.. Discovery.LocalAddresses()],
+            OutboxPath = OutboxFile,
         };
+        Outbox.SweepUnsent(PastedDir, OutboxFile, TimeSpan.FromDays(7));   // the feed's thumbnails use these too
         // The one UI-thread hop: the Hub calls this on its own queue thread.
         _hub = new Hub(hc, _device.Peers, e => Dispatcher.BeginInvoke(() => Handle(e)));
         _partners.Clear();

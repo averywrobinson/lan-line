@@ -109,9 +109,9 @@ sealed partial class MainWindow
         PostNotice(new ArrivalNotice($"Sent to {to}", body, []));
     }
 
-    static string SavePasted(System.Windows.Media.Imaging.BitmapSource img)
+    string SavePasted(System.Windows.Media.Imaging.BitmapSource img)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "Lan-Line-pasted");
+        var dir = PastedDir;
         Directory.CreateDirectory(dir);
         var path = Names.Unique($"pasted-{DateTime.Now:yyyyMMdd-HHmmss}.png", dir);
         using var fs = File.Create(path);

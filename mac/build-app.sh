@@ -1,6 +1,8 @@
 #!/bin/bash
 # Build Lan-Line.app (release), sign it, install to ~/Applications/Lan-Line.app.
 # Signs with the "Lan-Line Dev" identity if it exists (keeps the firewall allow across rebuilds), else ad-hoc.
+# SIGN_ID="Developer ID Application: …" (set by package.sh for release builds) signs with that identity instead,
+# with the hardened runtime and a secure timestamp, as notarization requires.
 set -euo pipefail
 cd "$(dirname "$0")"
 # Universal binary: Apple Silicon (arm64) and Intel (x86_64) in one app.
@@ -49,14 +51,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 # The Share extension (Finder → Share → Lan-Line), signed before the app that contains it.
-ShareExtension/build-appex.sh "$PWD/$APP" "$FULL" "$BUILD"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q '"Lan-Line Dev"'; then
-  ID="Lan-Line Dev"
+if [ -n "${SIGN_ID:-}" ]; then
+  ID="$SIGN_ID"; SIGN_OPTS=(--options runtime --timestamp)
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q '"Lan-Line Dev"'; then
+  ID="Lan-Line Dev"; SIGN_OPTS=()
 else
-  ID="-"
+  ID="-"; SIGN_OPTS=()
 fi
-codesign --force --sign "$ID" --identifier com.avery.lan-line "$APP"
-codesign --verify "$APP"
+SIGN_ID="$ID" ShareExtension/build-appex.sh "$PWD/$APP" "$FULL" "$BUILD"
+codesign --force --sign "$ID" "${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"}" --identifier com.avery.lan-line "$APP"
+codesign --verify --strict "$APP"
 [ "${1:-}" = "--no-install" ] && { echo "built $APP ($FULL)"; exit 0; }
 mkdir -p "$HOME/Applications"
 # ditto overwrites in place, so the existing install is replaced without deleting it first

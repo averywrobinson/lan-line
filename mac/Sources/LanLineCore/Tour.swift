@@ -43,7 +43,7 @@ public enum Tour {
             TourCard(id: "anywhere", title: "Everything in one place",
                      body: "What your computers send appears here. Tap to preview; touch and hold to copy, share or save to Photos."),
             TourCard(id: "close", title: "Open while you use it",
-                     body: "iPhone lets Lan-Line receive while it's open. Leave it open for big transfers."),
+                     body: "iPhone lets Lan-Line receive while it's open. What your computers send meanwhile waits on them and arrives when you open it. Leave it open for big transfers."),
         ]
         }
     }

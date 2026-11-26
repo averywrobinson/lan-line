@@ -14,6 +14,9 @@ public sealed class HubConfig
     public string AppVersion { get; init; } = "";
     public Updates.Available? LatestKnown { get; init; }
     public string[] Advertise { get; init; } = [];
+    /// <summary>Where items still waiting for a partner are kept, so quitting or restarting doesn't drop them (beta.11).
+    /// null = memory only (tests).</summary>
+    public string? OutboxPath { get; init; }
     /// <summary>Tests: adjust every partner Session's config.</summary>
     public Func<SessionConfig, SessionConfig>? Tune { get; init; }
 }
@@ -85,6 +88,13 @@ public sealed class Hub : IDisposable
     readonly Dictionary<Link, DateTime> _pending = [];
     readonly Dictionary<string, HubItem> _items = [];
     readonly Dictionary<string, (string Hub, string Partner)> _routes = [];
+    readonly Dictionary<string, double> _queuedAt = [];   // hub item id → when it was sent, Unix seconds (outbox order)
+    List<OutboxEntry>? _savedOutbox;                       // what OutboxPath holds now (null = not read yet, or a write failed)
+    bool _saveQueued;                                      // an outbox write is already on its way
+    readonly Dictionary<string, FolderScan> _scans = [];   // hub item id → its folder's walk, while something is owed
+    /// <summary>Forgotten just now, with what was still owed to it: re-pairing forgets the old pairing and then renames the new
+    /// one to the same device id, which takes these back (review, beta.11).</summary>
+    readonly Dictionary<string, (List<string> Items, DateTime At)> _released = [];
     readonly HashSet<string> _up = [];
     Listener? _listener;
     DiscoveryResponder? _responder;
@@ -107,6 +117,7 @@ public sealed class Hub : IDisposable
     {
         foreach (var id in _order.ToList()) MakeSession(id, pairing: false);
         EnsureListener();
+        RestoreOutbox();
         _timer = new Timer(_ => _q.Post(DropSilent), null, 1000, 1000);
     });
 
@@ -114,6 +125,7 @@ public sealed class Hub : IDisposable
     {
         var all = _q.Sync(() =>
         {
+            if (Config.OutboxPath != null) SaveOutbox();   // what a queued write hadn't written yet (beta.11)
             _stopped = true;
             _timer?.Dispose(); _timer = null;
             _listener?.Stop(); _listener = null;
@@ -133,6 +145,7 @@ public sealed class Hub : IDisposable
         var old = _q.Sync(() =>
         {
             _sessions.Remove(p.Id, out var o);
+            DropRoutes(p.Id);   // the old Session's last events (stopping resets "sent" to "waiting") mustn't count
             _partners[p.Id] = p;
             if (!_order.Contains(p.Id)) _order.Add(p.Id);
             _up.Remove(p.Id);
@@ -141,7 +154,7 @@ public sealed class Hub : IDisposable
         var kept = old?.StopKeepingPartials();   // half-received files stay resumable across the swap
         _q.Post(() =>
         {
-            if (!_stopped) { MakeSession(p.Id, pairing, kept); EnsureListener(); }
+            if (!_stopped) { MakeSession(p.Id, pairing, kept); RequeueOwed(p.Id); EnsureListener(); }
             else if (kept != null) foreach (var k in kept.Values) try { File.Delete(k.Part); } catch (Exception) { }
         });
     }
@@ -160,7 +173,17 @@ public sealed class Hub : IDisposable
     /// <summary>Forget a partner: its Session stops and its secret is no longer accepted.</summary>
     public void Remove(string id)
     {
-        var old = _q.Sync(() => { _partners.Remove(id); _order.Remove(id); _up.Remove(id); _sessions.Remove(id, out var o); return o; });
+        var old = _q.Sync(() =>
+        {
+            _partners.Remove(id); _order.Remove(id); _up.Remove(id);
+            DropRoutes(id);
+            var owedHere = _items.Where(i => i.Value.States.TryGetValue(id, out var st) && Outbox.Owed(st)).Select(i => i.Key).ToList();
+            if (owedHere.Count > 0) _released[id] = (owedHere, DateTime.UtcNow); else _released.Remove(id);
+            foreach (var (k, h) in _items.Where(i => i.Value.To.Contains(id)).ToList())   // nothing more is owed to a forgotten partner
+                _items[k] = h with { To = [.. h.To.Where(t => t != id)], States = h.States.Where(x => x.Key != id).ToDictionary() };
+            ScheduleSave();
+            _sessions.Remove(id, out var o); return o;
+        });
         old?.Stop();
         _q.Post(() => _handler(new HubEvent.Disconnected(id, "forgotten")));
     }
@@ -175,6 +198,29 @@ public sealed class Hub : IDisposable
         if (_tags.Remove(oldId, out var t)) { t.Id = newId; _tags[newId] = t; }
         if (_up.Remove(oldId)) _up.Add(newId);
         foreach (var k in _routes.Where(r => r.Value.Partner == oldId).Select(r => r.Key).ToList()) _routes[k] = (_routes[k].Hub, newId);
+        foreach (var (k, h) in _items.Where(i => i.Value.To.Contains(oldId) || i.Value.States.ContainsKey(oldId)).ToList())
+            _items[k] = h with
+            {
+                To = [.. h.To.Select(t => t == oldId ? newId : t)],
+                States = h.States.ToDictionary(x => x.Key == oldId ? newId : x.Key, x => x.Value),
+            };
+        // Re-pairing: the older pairing with this computer was forgotten a moment ago; what it was owed goes on.
+        if (_released.Remove(newId, out var r) && DateTime.UtcNow - r.At < TimeSpan.FromMinutes(2))
+        {
+            var back = new List<string>();
+            foreach (var k in r.Items)
+            {
+                if (!_items.TryGetValue(k, out var h)) continue;
+                _items[k] = h with
+                {
+                    To = h.To.Contains(newId) ? h.To : [.. h.To, newId],
+                    States = new Dictionary<string, ItemState>(h.States) { [newId] = ItemState.Waiting },
+                };
+                back.Add(k);
+            }
+            SendOwed(newId, back);
+        }
+        ScheduleSave();
     });
 
     /// <summary>An update check found a newer version: every partner Session shows it once and passes it on.</summary>
@@ -226,37 +272,164 @@ public sealed class Hub : IDisposable
     public void CancelIncoming(string partner, string id) => _q.Post(() => { if (_sessions.TryGetValue(partner, out var s)) s.CancelIncoming(id); });
 
     public HubItem SendText(string text, string? to) =>
-        FanOut(new Item("", false, text, null, text.Length, null, ItemState.Waiting), to, s => s.SendText(text));
+        FanOut(new Item("", false, text, null, text.Length, null, ItemState.Waiting), to, (s, sid) => s.SendText(text, sid));
 
     public HubItem SendFile(string path, string? to)
     {
         long size = -1; try { size = new FileInfo(path).Length; } catch (Exception) { }
-        return FanOut(new Item("", false, null, Path.GetFileName(path), size, path, ItemState.Waiting), to, s => s.SendFile(path));
+        return FanOut(new Item("", false, null, Path.GetFileName(path), size, path, ItemState.Waiting), to, (s, sid) => s.SendFile(path, sid));
     }
 
     public HubItem SendFolder(string path, string? to)
     {
         var scan = Session.ScanFolder(path);
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
-        return FanOut(new Item("", false, null, name, scan.Size, path, ItemState.Waiting, scan.Count), to, s => s.SendFolder(path));
+        return FanOut(new Item("", false, null, name, scan.Size, path, ItemState.Waiting, scan.Count), to, (s, sid) => s.SendFolder(path, sid, scan), scan);
     }
 
     /// <summary>Everyone (to null) or one partner. Each partner's Session queues its own copy, so an offline partner gets it later.</summary>
-    HubItem FanOut(Item template, string? to, Func<Session, Item> send)
+    HubItem FanOut(Item template, string? to, Func<Session, string, Item> send, FolderScan? scan = null)
     {
         var targets = _q.Sync(() => (to == null ? _order : [to]).Where(_sessions.ContainsKey).Select(id => (id, _sessions[id])).ToList());
         var id = Guid.NewGuid().ToString();
         var states = targets.ToDictionary(t => t.id, _ => ItemState.Waiting);
         var hub = new HubItem(id, template with { Id = id }, [.. targets.Select(t => t.id)], states);
-        var sent = targets.Select(t => (t.id, send(t.Item2))).ToList();
-        _q.Sync(() =>
-        {
-            foreach (var (pid, it) in sent) _routes[it.Id] = (id, pid);
-            _items[id] = hub;
-            return 0;
-        });
+        // Routes first: an answer that comes back within a moment (a fast LAN) must find its item, or the row stays
+        // "waiting" and the outbox would send it again after a restart.
+        var sent = targets.Select(t => (t.id, Guid.NewGuid().ToString())).ToList();
+        _q.Sync(() => { Register(hub, sent, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0, scan); return 0; });   // the file write itself goes async
+        for (var i = 0; i < targets.Count; i++) send(targets[i].Item2, sent[i].Item2);
         _q.Post(() => { if (_items.TryGetValue(id, out var h)) _handler(new HubEvent.Outgoing(h)); });
         return hub;
+    }
+
+    /// <summary>On the queue.</summary>
+    void Register(HubItem hub, List<(string, string)> sent, double at, FolderScan? scan = null, bool save = true)
+    {
+        foreach (var (pid, sid) in sent) _routes[sid] = (hub.Id, pid);
+        _items[hub.Id] = hub;
+        _queuedAt[hub.Id] = at;
+        if (scan != null) _scans[hub.Id] = scan;
+        if (save) ScheduleSave();
+    }
+
+    /// <summary>On the queue: forget the routes to a partner's Session that is being stopped or replaced.</summary>
+    void DropRoutes(string pid)
+    {
+        foreach (var k in _routes.Where(r => r.Value.Partner == pid).Select(r => r.Key).ToList()) _routes.Remove(k);
+    }
+
+    // ---------- outbox (beta.11)
+
+    static Item SendCopy(Item kind, Session s, FolderScan? scan) =>
+        kind.Text != null ? s.SendText(kind.Text) : kind.IsFolder ? s.SendFolder(kind.Path!, given: scan) : s.SendFile(kind.Path!);
+
+    /// <summary>On the queue: hand these items to the partner's current Session, oldest first, and route its answers back.</summary>
+    void SendOwed(string pid, List<string> ids)
+    {
+        if (!_sessions.TryGetValue(pid, out var s)) return;
+        foreach (var id in ids.OrderBy(i => _queuedAt.GetValueOrDefault(i)).ThenBy(i => i, StringComparer.Ordinal))
+        {
+            if (!_items.TryGetValue(id, out var h)) continue;
+            if (h.Item.IsFolder && !_scans.ContainsKey(id)) _scans[id] = Session.ScanFolder(h.Item.Path!);   // walked once
+            _routes[SendCopy(h.Item, s, _scans.GetValueOrDefault(id)).Id] = (id, pid);
+            _items[id] = h = h with { States = new Dictionary<string, ItemState>(h.States) { [pid] = ItemState.Waiting } };
+            _handler(new HubEvent.Outgoing(h));
+        }
+    }
+
+    /// <summary>On the queue: write the outbox soon, once for a burst of changes, and never while a caller waits in Sync.</summary>
+    void ScheduleSave()
+    {
+        if (Config.OutboxPath == null || _saveQueued) return;
+        _saveQueued = true;
+        _q.Post(() => { _saveQueued = false; SaveOutbox(); });
+    }
+
+    /// <summary>On the queue: write the items still owed to someone, if that changed.</summary>
+    void SaveOutbox()
+    {
+        if (Config.OutboxPath is not { } path) return;
+        var list = new List<OutboxEntry>();
+        foreach (var (id, h) in _items)
+        {
+            var to = h.To.Where(t => _partners.ContainsKey(t) && h.States.TryGetValue(t, out var st) && Outbox.Owed(st)).ToArray();
+            if (to.Length == 0) { _scans.Remove(id); continue; }
+            var it = h.Item;
+            list.Add(new OutboxEntry
+            {
+                Id = id, To = to, At = _queuedAt.GetValueOrDefault(id),
+                Kind = it.Text != null ? "text" : it.IsFolder ? "folder" : "file",
+                Text = it.Text, Path = it.Text == null ? it.Path : null,
+            });
+        }
+        list = [.. list.OrderBy(e => e.At).ThenBy(e => e.Id, StringComparer.Ordinal)];
+        _savedOutbox ??= Outbox.Load(path);
+        if (Outbox.Same(_savedOutbox, list)) return;
+        if (Outbox.Save(path, list)) { _savedOutbox = list; return; }
+        // Not written (on Windows a file being read can't be replaced): read it again next time, and try again shortly.
+        _savedOutbox = null;
+        if (!_stopped) _q.PostAfter(TimeSpan.FromMilliseconds(500), () => { if (!_stopped) ScheduleSave(); });
+    }
+
+    /// <summary>On the queue, at start: queue again what was still owed when Lan-Line last stopped, in the order it was sent,
+    /// to the partners that hadn't got it. A file or folder that has gone since is shown as failed, not sent.</summary>
+    void RestoreOutbox()
+    {
+        if (Config.OutboxPath is not { } path) return;
+        var list = Outbox.Load(path);
+        _savedOutbox = list;
+        foreach (var e in list)
+        {
+            var targets = e.To.Where(_sessions.ContainsKey).Select(id => (id, s: _sessions[id])).ToList();
+            if (targets.Count == 0 || _items.ContainsKey(e.Id)) continue;
+            Item kind;
+            bool gone = false;
+            switch (e.Kind)
+            {
+                case "text" when e.Text != null:
+                    kind = new Item(e.Id, false, e.Text, null, e.Text.Length, null, ItemState.Waiting);
+                    break;
+                case "file" when e.Path != null:
+                    {
+                        gone = !File.Exists(e.Path);
+                        long size = -1; try { size = new FileInfo(e.Path).Length; } catch (Exception) { }
+                        kind = new Item(e.Id, false, null, Path.GetFileName(e.Path), size, e.Path, ItemState.Waiting);
+                        break;
+                    }
+                case "folder" when e.Path != null:
+                    {
+                        gone = !Directory.Exists(e.Path);
+                        var scan = gone ? new FolderScan([], 0, 0, 0) : Session.ScanFolder(e.Path);
+                        if (!gone) _scans[e.Id] = scan;
+                        kind = new Item(e.Id, false, null, Path.GetFileName(Path.TrimEndingDirectorySeparator(e.Path)), scan.Size, e.Path, ItemState.Waiting, scan.Count);
+                        break;
+                    }
+                default: continue;
+            }
+            var to = targets.Select(t => t.id).ToArray();
+            if (gone)
+            {
+                var failed = new ItemState(ItemStateKind.Failed, Error: "it's no longer there");
+                var h = new HubItem(e.Id, kind, to, to.ToDictionary(t => t, _ => failed));
+                _items[e.Id] = h; _queuedAt[e.Id] = e.At;
+                _handler(new HubEvent.Outgoing(h));
+                continue;
+            }
+            var hub = new HubItem(e.Id, kind, to, to.ToDictionary(t => t, _ => ItemState.Waiting));
+            // on the queue: enqueued after this; saved once, below, so the file keeps the whole list meanwhile
+            Register(hub, [.. targets.Select(t => (t.id, SendCopy(kind, t.s, _scans.GetValueOrDefault(e.Id)).Id))], e.At, save: false);
+            _handler(new HubEvent.Outgoing(hub));
+        }
+        SaveOutbox();
+    }
+
+    /// <summary>On the queue: a partner's Session was replaced (paired again, or it moved to a new address). What the old one
+    /// still owed it goes to the new one, oldest first, instead of being dropped with it.</summary>
+    void RequeueOwed(string pid)
+    {
+        DropRoutes(pid);   // the old Session is stopped
+        SendOwed(pid, [.. _items.Where(i => i.Value.States.TryGetValue(pid, out var st) && Outbox.Owed(st)).Select(i => i.Key)]);
     }
 
     // ---------- sessions
@@ -293,9 +466,12 @@ public sealed class Hub : IDisposable
             case SessionEvent.Incoming inc: _handler(new HubEvent.Incoming(id, inc.Item)); break;
             case SessionEvent.Clipboard cb: _handler(new HubEvent.Clipboard(id, cb.Content)); break;
             case SessionEvent.Outgoing o:
-                if (!_routes.TryGetValue(o.Item.Id, out var r2) || !_items.TryGetValue(r2.Hub, out var h)) return;
+                // Stopping: a Session going down resets "sent" to "waiting"; that must not put it back in the outbox.
+                if (_stopped || !_routes.TryGetValue(o.Item.Id, out var r2) || !_items.TryGetValue(r2.Hub, out var h)) return;
+                var was = h.States.TryGetValue(r2.Partner, out var before) && Outbox.Owed(before);
                 var st = new Dictionary<string, ItemState>(h.States) { [r2.Partner] = o.Item.State };
                 _items[r2.Hub] = h = h with { States = st };
+                if (was != Outbox.Owed(o.Item.State)) ScheduleSave();   // not on every progress tick
                 _handler(new HubEvent.Outgoing(h));
                 break;
             case SessionEvent.ReceiveFailed f: _handler(new HubEvent.ReceiveFailed(id, f.Name, f.Reason, f.Id)); break;
@@ -341,6 +517,7 @@ public sealed class Hub : IDisposable
                 if (_stopped || _up.Contains(p.Id) || !_partners.ContainsKey(p.Id)) return null;
                 _partners[p.Id] = q;
                 _sessions.Remove(p.Id, out var o);
+                DropRoutes(p.Id);
                 _handler(new HubEvent.PeerAddresses(p.Id, q.Hosts));
                 return o;
             });
@@ -348,7 +525,7 @@ public sealed class Hub : IDisposable
             var kept = old.StopKeepingPartials();   // a file cut off by the address change stays resumable
             _q.Post(() =>
             {
-                if (!_stopped && _partners.ContainsKey(p.Id) && !_sessions.ContainsKey(p.Id)) MakeSession(p.Id, pairing: false, kept);
+                if (!_stopped && _partners.ContainsKey(p.Id) && !_sessions.ContainsKey(p.Id)) { MakeSession(p.Id, pairing: false, kept); RequeueOwed(p.Id); }
                 else foreach (var k in kept.Values) try { File.Delete(k.Part); } catch (Exception) { }
             });
         }

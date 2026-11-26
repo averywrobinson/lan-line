@@ -2,6 +2,21 @@ import XCTest
 @testable import LanLineCore
 
 final class UnitTests: XCTestCase {
+    /// beta.11: a photo or video handed over with a machine-made name gets a readable one; a chosen name is kept.
+    func testReadableMediaNames() {
+        let at = Date(timeIntervalSince1970: 1795706841)   // 2026-11-26 15:27:21 UTC
+        let utc = TimeZone(identifier: "UTC")!
+        XCTAssertEqual(Names.readableMedia("AE54C04B-B03D-4001-9031-43ABB62B1F37.MP4", at: at, timeZone: utc), "Video 2026-11-26 at 15.27.21.MP4")
+        XCTAssertEqual(Names.readableMedia("trim.6F1C2A90-1B2C-4D3E-8F90-0A1B2C3D4E5F.MOV", at: at, timeZone: utc), "Video 2026-11-26 at 15.27.21.MOV")
+        XCTAssertEqual(Names.readableMedia("9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d.heic", at: at, timeZone: utc), "Photo 2026-11-26 at 15.27.21.heic")
+        XCTAssertEqual(Names.readableMedia("IMG_0042.HEIC", at: at, timeZone: utc), "IMG_0042.HEIC")
+        XCTAssertEqual(Names.readableMedia("holiday.jpg", at: at, timeZone: utc), "holiday.jpg")
+        XCTAssertEqual(Names.readableMedia("cafe.mov", at: at, timeZone: utc), "cafe.mov", "short hex-looking words stay")
+        XCTAssertEqual(Names.readableMedia("AE54C04B-B03D-4001-9031-43ABB62B1F37.pdf", at: at, timeZone: utc),
+                       "AE54C04B-B03D-4001-9031-43ABB62B1F37.pdf", "only photos and videos are renamed")
+        XCTAssertFalse(Names.readableMedia("AE54C04B-B03D-4001-9031-43ABB62B1F37.MP4", at: at).contains(":"))
+    }
+
     func testSanitize() {
         XCTAssertEqual(Names.sanitize("../../etc/passwd"), "passwd")
         XCTAssertEqual(Names.sanitize("..\\..\\Windows\\win.ini"), "win.ini")

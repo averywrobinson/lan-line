@@ -28,7 +28,7 @@ public static class Tour
         [
             new("send", "Send anything", "Type a message, or tap + for photos, videos and files. They arrive on your computer a moment later, encrypted end to end."),
             new("anywhere", "Everything in one place", "What your computers send appears here. Tap to preview; touch and hold to copy, share or save to Photos."),
-            new("close", "Open while you use it", "iPhone lets Lan-Line receive while it's open. Leave it open for big transfers."),
+            new("close", "Open while you use it", "iPhone lets Lan-Line receive while it's open. What your computers send meanwhile waits on them and arrives when you open it. Leave it open for big transfers."),
         ],
     };
 

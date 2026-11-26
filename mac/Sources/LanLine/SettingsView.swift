@@ -165,26 +165,13 @@ struct SettingsView: View {
         .softEdges(top: 14, bottom: 26, floor: 0.15)
             VStack(alignment: .leading, spacing: 8) {   // floating: Save never scrolls out of view
                 if let error { Text(error).font(.system(size: fs(11))).foregroundStyle(p.danger) }
-                HStack(spacing: 10) {
-                    Button("Open folder") { model.settingsActions.openFolder() }.controlSize(.small)
-                    Button("Clean up now") { if let s = build() { model.settingsActions.save(s); model.settingsActions.cleanNow() } }
-                        .controlSize(.small)
-                        .help("Saves these settings and applies them now")
-                    Spacer()
-                    if !model.settingsFirstRun {
-                        Button("Cancel") { model.settingsActions.cancel() }.controlSize(.small).keyboardShortcut(.cancelAction)
+                // beta.11: in a narrow window the folder buttons move up a line instead of being cut short
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { folderButtons; Spacer(minLength: 8); saveButtons }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) { folderButtons }
+                        HStack(spacing: 10) { Spacer(minLength: 0); saveButtons }
                     }
-                    Button {
-                        if let s = build() {
-                            if openAtLogin != model.openAtLogin { model.settingsActions.setOpenAtLogin(openAtLogin) }
-                            model.settingsActions.save(s)
-                        }
-                    } label: {
-                        Text("Save").font(.system(size: fs(12.5), weight: .semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 16).frame(height: 26)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(p.accent))
-                    }
-                    .buttonStyle(.plain).keyboardShortcut(.defaultAction)
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
@@ -193,6 +180,30 @@ struct SettingsView: View {
             .readHeight($barHeight)
         }
         .onAppear(perform: load)
+    }
+
+    @ViewBuilder private var folderButtons: some View {
+        Button("Open folder") { model.settingsActions.openFolder() }.controlSize(.small).fixedSize()
+        Button("Clean up now") { if let s = build() { model.settingsActions.save(s); model.settingsActions.cleanNow() } }
+            .controlSize(.small).fixedSize()
+            .help("Saves these settings and applies them now")
+    }
+
+    @ViewBuilder private var saveButtons: some View {
+        if !model.settingsFirstRun {
+            Button("Cancel") { model.settingsActions.cancel() }.controlSize(.small).fixedSize().keyboardShortcut(.cancelAction)
+        }
+        Button {
+            if let s = build() {
+                if openAtLogin != model.openAtLogin { model.settingsActions.setOpenAtLogin(openAtLogin) }
+                model.settingsActions.save(s)
+            }
+        } label: {
+            Text("Save").font(.system(size: fs(12.5), weight: .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 16).frame(height: 26)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.of(scheme).accent))
+        }
+        .buttonStyle(.plain).keyboardShortcut(.defaultAction).fixedSize()
     }
 
     private var currentLimitBytes: Int64 {

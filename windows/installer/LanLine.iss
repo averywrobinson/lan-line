@@ -4,7 +4,7 @@
 ; Paths can be overridden with /DLicensePath=... /DOutDir=... /DSourceDir=...
 ; Per-user install (no admin prompt), self-contained .NET, Start menu shortcut, optional sign-in start, clean uninstall.
 #define AppVersion "0.9.0"
-#define AppVersionFull "0.9.0-beta.10"
+#define AppVersionFull "0.9.0-beta.11"
 #ifndef SourceDir
   #define SourceDir "..\publish-sc"
 #endif

@@ -713,7 +713,7 @@ sealed partial class MainWindow : Window
         else if (Clipboard.ContainsImage() && !Clipboard.ContainsText() && Clipboard.GetImage() is { } img)
         {
             e.Handled = true;
-            var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Lan-Line-pasted");
+            var dir = PastedDir;
             Directory.CreateDirectory(dir);
             var path = Names.Unique($"pasted-{DateTime.Now:yyyyMMdd-HHmmss}.png", dir);
             using (var fs = File.Create(path))

@@ -513,6 +513,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hc.appVersion = options.value("--app-version") ?? AppInfo.version
         hc.latestKnown = savedLatest()
         hc.advertise = Discovery.localAddresses()
+        let outbox = options.configURL.deletingLastPathComponent().appendingPathComponent("outbox.json")   // beta.11
+        hc.outboxURL = outbox
+        Pasted.dir = options.configURL.deletingLastPathComponent().appendingPathComponent("Pasted", isDirectory: true)
+        Hub.sweepUnsent(Pasted.dir, outbox: outbox, olderThan: 7 * 86_400)   // the feed's thumbnails use these too
         // The one main-thread hop: the Hub calls this on its own queue.
         let h = Hub(config: hc, partners: device.peers) { [weak self] e in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.event(e) } }

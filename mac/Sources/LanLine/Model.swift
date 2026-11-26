@@ -47,6 +47,14 @@ enum PairMode { case show, enter }
 
 /// Everything the window shows. Lives on the main thread; the Session's events reach it through
 /// the one hop in `AppController.startSession`.
+/// Pictures pasted or dropped as data wait here to be sent. Not the temporary folder, which macOS empties when it
+/// restarts: something still waiting for a partner (`outbox.json`) must still be there after one (beta.11).
+/// The app points it next to its config at launch; what nothing waits for is tidied after 7 days (the feed shows them).
+@MainActor
+enum Pasted {
+    static var dir = FileManager.default.temporaryDirectory.appendingPathComponent("Lan-Line-pasted", isDirectory: true)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var rows: [Row] = []
@@ -588,7 +596,7 @@ final class AppModel: ObservableObject {
 
     func sendImage(_ png: Data) {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Lan-Line-pasted")
+        let dir = Pasted.dir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = Names.unique("pasted-\(f.string(from: Date())).png", in: dir)
         do { try png.write(to: url); sendFiles([url]) } catch { note("Couldn't save the pasted image") }
